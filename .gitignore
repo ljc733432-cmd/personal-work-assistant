@@ -1,0 +1,33 @@
+# ===== 依赖 =====
+node_modules/
+.pnp.*
+.yarn/
+
+# ===== 构建产物 =====
+个人工作助手-app/dist/
+个人工作助手-app/dist-electron/
+个人工作助手-app/release/
+个人工作助手-app/out/
+
+# ===== Electron / 运行时数据 =====
+个人工作助手-app/app.db*
+个人工作助手-app/*.log
+*.local
+
+# ===== 编辑器 / 系统 =====
+.vscode/*
+!.vscode/extensions.json
+!.vscode/settings.json
+.idea/
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# ===== 密钥 / 环境变量（永远不提交）=====
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+secrets/
+.zcode/
