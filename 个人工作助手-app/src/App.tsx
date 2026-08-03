@@ -9,6 +9,7 @@ import { ChatPage } from '@/pages/chat/ChatPage'
 import { SettingsPage } from '@/pages/settings/SettingsPage'
 import { TasksPage } from '@/pages/tasks/TasksPage'
 import { ToolsPage } from '@/pages/tools/ToolsPage'
+import { NotesPage } from '@/pages/notes/NotesPage'
 
 // v1.2：导航从 3 项扩到 5 项（对话/任务/笔记/工具/设置）。
 // 笔记页与工具页（M12.5~M12.9）暂未实现，先占位渲染空状态，
@@ -87,23 +88,13 @@ function App() {
         ) : tab === 'tasks' ? (
           <TasksPage />
         ) : tab === 'notes' ? (
-          <PlaceholderPage label="笔记" hint="M12.7~M12.8 实现" />
+          <NotesPage />
         ) : tab === 'tools' ? (
           <ToolsPage />
         ) : (
           <SettingsPage />
         )}
       </main>
-    </div>
-  )
-}
-
-/** 笔记/工具页占位（后续里程碑替换为真实页面）。 */
-function PlaceholderPage({ label, hint }: { label: string; hint: string }) {
-  return (
-    <div className="flex h-full flex-col items-center justify-center gap-2 text-muted-foreground">
-      <div className="text-lg font-medium text-foreground">{label}</div>
-      <div className="text-sm">{hint}</div>
     </div>
   )
 }

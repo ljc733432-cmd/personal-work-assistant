@@ -12,6 +12,7 @@ import { SearchProviderSection } from './SearchProviderSection'
 import { ExtractSection } from './ExtractSection'
 import { FollowupSection } from './FollowupSection'
 import { AppearanceSection } from './AppearanceSection'
+import { NotesSection } from './NotesSection'
 
 const PRESETS: Record<ProviderType, { baseURL: string; model: string }> = {
   deepseek: { baseURL: 'https://api.deepseek.com', model: 'deepseek-chat' },
@@ -75,6 +76,10 @@ export function SettingsPage() {
 
         <div className="!mt-10 border-t pt-2">
           <AppearanceSection />
+        </div>
+
+        <div className="!mt-10 border-t pt-2">
+          <NotesSection />
         </div>
 
         <div className="!mt-10 border-t pt-2">
