@@ -56,6 +56,7 @@ const ALLOWED_ON = [
   'chat:tool_call',         // 模型发起 FC（用于二次确认类操作，M6 用）
   'chat:confirm_request',   // 工具需要用户确认（write_file 覆盖，M5）
   'chat:truncated',         // 上下文截断提示（M2-Step7：已省略较早的 X 条）
+  'followup:open',          // M6：跟进通知点击，通知渲染层跳转跟进会话
 ] as const
 
 function isAllowed(value: string, list: readonly string[]): boolean {

@@ -1,11 +1,20 @@
-import { app, BrowserWindow, shell } from 'electron'
+import { app, BrowserWindow, shell, Tray, Menu, nativeImage, Notification } from 'electron'
 import { createRequire } from 'node:module'
 import { fileURLToPath } from 'node:url'
 import path from 'node:path'
 import os from 'node:os'
+import fs from 'node:fs'
 
 import { registerIpcHandlers } from '../ipc'
-import { logError } from '../services/logger'
+import { logError, logInfo } from '../services/logger'
+import { closeDb, getDb } from '../services/db'
+import { settings } from '../services/db/schema'
+import { eq } from 'drizzle-orm'
+import {
+  runFollowupTick,
+  startFollowupScheduler,
+  stopFollowupScheduler,
+} from '../services/followup/scheduler'
 
 const require = createRequire(import.meta.url)
 const __dirname = path.dirname(fileURLToPath(import.meta.url))
@@ -52,6 +61,9 @@ if (!app.requestSingleInstanceLock()) {
 }
 
 let win: BrowserWindow | null = null
+let tray: Tray | null = null
+// M6：true 时表示正在真正退出（托盘"退出"触发），此时窗口 close 不再拦截。
+let isQuitting = false
 const preload = path.join(__dirname, '../preload/index.mjs')
 const indexHtml = path.join(RENDERER_DIST, 'index.html')
 
@@ -62,7 +74,7 @@ async function createWindow() {
     height: 800,
     minWidth: 900,
     minHeight: 600,
-    icon: path.join(process.env.VITE_PUBLIC, 'favicon.ico'),
+    icon: path.join(process.env.APP_ROOT, 'build/icon.ico'),
     show: false,
     autoHideMenuBar: true,
     webPreferences: {
@@ -75,6 +87,14 @@ async function createWindow() {
   })
 
   win.on('ready-to-show', () => win?.show())
+
+  // M6：关窗 = 最小化到托盘（不退出）。只有托盘"退出"才真正退出（isQuitting）。
+  win.on('close', (e) => {
+    if (!isQuitting) {
+      e.preventDefault()
+      win?.hide()
+    }
+  })
 
   if (VITE_DEV_SERVER_URL) {
     win.loadURL(VITE_DEV_SERVER_URL)
@@ -90,29 +110,179 @@ async function createWindow() {
   })
 }
 
-app.whenReady().then(() => {
+// ---------- M6：托盘 ----------
+
+/** 读 settings 的 followup.paused（"true"/"false"，默认 false 即启用）。 */
+function isFollowupPaused(): boolean {
+  try {
+    const row = getDb().select().from(settings).where(eq(settings.key, 'followup.paused')).get()
+    return row?.value === 'true'
+  } catch {
+    return false
+  }
+}
+
+/** 读 settings 的 followup.cron（默认 '0 9,14 * * *' = 每天 9:00 和 14:00）。 */
+function getFollowupCron(): string {
+  try {
+    const row = getDb().select().from(settings).where(eq(settings.key, 'followup.cron')).get()
+    return row?.value || '0 9,14 * * *'
+  } catch {
+    return '0 9,14 * * *'
+  }
+}
+
+/** 构建托盘右键菜单。paused 状态变化时重建。 */
+function buildTrayMenu(): Menu {
+  const paused = isFollowupPaused()
+  return Menu.buildFromTemplate([
+    {
+      label: '显示窗口',
+      click: () => showWindow(),
+    },
+    {
+      label: '立即检查跟进',
+      click: () => handleManualFollowup(),
+    },
+    { type: 'separator' },
+    {
+      label: paused ? '恢复定时跟进' : '暂停定时跟进',
+      click: () => {
+        // 翻转 paused 并重启调度
+        const db = getDb()
+        const now = Math.floor(Date.now() / 1000)
+        db.insert(settings)
+          .values({ key: 'followup.paused', value: String(!paused) })
+          .onConflictDoUpdate({
+            target: settings.key,
+            set: { value: String(!paused), updatedAt: now },
+          })
+          .run()
+        restartScheduler()
+        tray?.setContextMenu(buildTrayMenu())
+        logInfo(`[tray] 跟进已${!paused ? '暂停' : '恢复'}`)
+      },
+    },
+    { type: 'separator' },
+    {
+      label: '退出',
+      click: () => {
+        isQuitting = true
+        app.quit()
+      },
+    },
+  ])
+}
+
+/** 显示并聚焦窗口（从托盘恢复）。 */
+function showWindow(): void {
+  if (!win || win.isDestroyed()) {
+    createWindow()
+    return
+  }
+  if (win.isMinimized()) win.restore()
+  win.show()
+  win.focus()
+}
+
+/** 手动触发跟进检查（托盘"立即检查"）。 */
+async function handleManualFollowup(): Promise<void> {
+  try {
+    const result = await runFollowupTick()
+    if (result) {
+      showFollowupNotification(result)
+    } else {
+      // 无候选或未配模型，用通知提示用户
+      new Notification({
+        title: '跟进检查',
+        body: '当前无需跟进的任务（或未配置跟进模型）',
+      }).show()
+    }
+  } catch (e) {
+    logError('[tray] 手动跟进出错:', String(e))
+  }
+}
+
+/** 弹跟进通知（cron 到点 / 手动触发都调）。点击跳转到跟进会话。 */
+function showFollowupNotification(result: { conversationId: string; count: number }): void {
+  const n = new Notification({
+    title: '任务跟进提醒',
+    body: `有 ${result.count} 个任务待跟进，点击查看`,
+  })
+  n.on('click', () => {
+    showWindow()
+    // 通知渲染层跳转到跟进会话
+    win?.webContents.send('followup:open', { conversationId: result.conversationId })
+  })
+  n.show()
+}
+
+/** 启动/重启调度器（按当前 settings 的 cron + paused）。 */
+async function restartScheduler(): Promise<void> {
+  if (isFollowupPaused()) {
+    stopFollowupScheduler()
+    logInfo('[scheduler] 跟进已暂停，调度器停止')
+    return
+  }
+  const cron = getFollowupCron()
+  await startFollowupScheduler(cron, (result) => {
+    if (result) showFollowupNotification(result)
+  })
+}
+
+function createTray(): void {
+  // 托盘图标：build/icon.ico（electron-vite 脚手架默认位置）。
+  // 注意不是 public/favicon.ico——那个文件项目里不存在。
+  const iconPath = path.join(process.env.APP_ROOT, 'build/icon.ico')
+  logInfo('[tray] 图标路径:', iconPath, '存在:', fs.existsSync(iconPath) ? '是' : '否')
+  let image = nativeImage.createFromPath(iconPath)
+  if (image.isEmpty()) {
+    // 兜底：build/icon.png
+    const pngPath = path.join(process.env.APP_ROOT, 'build/icon.png')
+    logInfo('[tray] ico 失败，尝试 png:', pngPath, '存在:', fs.existsSync(pngPath) ? '是' : '否')
+    image = nativeImage.createFromPath(pngPath)
+  }
+  if (image.isEmpty()) {
+    logInfo('[tray] 图标全部加载失败，用空 image（菜单仍可用，只是无图标）')
+    image = nativeImage.createEmpty()
+  }
+  tray = new Tray(image)
+  tray.setToolTip('个人工作助手')
+  tray.setContextMenu(buildTrayMenu())
+  tray.on('click', () => showWindow())
+  logInfo('[tray] 托盘已创建')
+}
+
+// ---------- app 生命周期 ----------
+
+app.whenReady().then(async () => {
   registerIpcHandlers()
   createWindow()
+  createTray()
+  await restartScheduler()
 })
 
+// M6：关窗不再退出（缩托盘），所以这里不做 app.quit()。
 app.on('window-all-closed', () => {
-  win = null
-  // M1：关窗即退出。M6 会改成缩托盘常驻。
-  if (process.platform !== 'darwin') app.quit()
+  // macOS 沿用平台惯例（不退出）；其他平台也保留托盘常驻（M6 改动）
 })
 
 app.on('second-instance', () => {
-  if (win) {
-    if (win.isMinimized()) win.restore()
-    win.focus()
-  }
+  showWindow()
 })
 
 app.on('activate', () => {
-  const allWindows = BrowserWindow.getAllWindows()
-  if (allWindows.length) {
-    allWindows[0].focus()
-  } else {
-    createWindow()
-  }
+  // macOS 点 dock 图标
+  showWindow()
+})
+
+// M6：退出前停调度器
+app.on('before-quit', () => {
+  isQuitting = true
+  stopFollowupScheduler()
+})
+
+// M6：所有窗口已关、app 即将退，关闭 DB 连接（之前一直没调，WAL 不落盘）
+app.on('will-quit', () => {
+  closeDb()
 })

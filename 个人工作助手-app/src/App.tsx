@@ -1,5 +1,7 @@
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import { cn } from '@/lib/utils'
+import { on } from '@/lib/ipc'
+import { useChatStore } from '@/stores/chat'
 import { ChatPage } from '@/pages/chat/ChatPage'
 import { SettingsPage } from '@/pages/settings/SettingsPage'
 import { TasksPage } from '@/pages/tasks/TasksPage'
@@ -8,6 +10,16 @@ type Tab = 'chat' | 'tasks' | 'settings'
 
 function App() {
   const [tab, setTab] = useState<Tab>('chat')
+
+  // M6：订阅跟进通知点击 → 跳转到对话页 + 切到跟进会话
+  useEffect(() => {
+    return on('followup:open', (...args) => {
+      const ev = args[0] as { conversationId: string }
+      setTab('chat')
+      // 切到跟进会话（store 会按需 hydrate 历史，能看到 AI 的问候消息）
+      useChatStore.getState().switchConversation(ev.conversationId).catch(() => {})
+    })
+  }, [])
 
   return (
     <div className="flex h-screen w-screen overflow-hidden bg-background">

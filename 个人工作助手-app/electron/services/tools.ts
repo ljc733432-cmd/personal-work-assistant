@@ -12,6 +12,10 @@ import {
 } from './fileTools'
 import { webSearch, type ActiveSearchConfig } from './searchTools'
 import type { ToolHandlerResult } from './providers/types'
+import { getDb } from './db'
+import { tasks } from './db/schema'
+import { eq } from 'drizzle-orm'
+import type { TaskStatus } from '../types'
 import fs from 'node:fs'
 import fsp from 'node:fs/promises'
 import path from 'node:path'
@@ -43,6 +47,11 @@ export interface ToolContext {
    * 与 sources 同模式：getter 在 IPC 层注入，每次调用现读。
    */
   getActiveSearchConfig?: () => ActiveSearchConfig | null
+  /**
+   * M6：当前会话类型。'followup' 时额外注册 update_task_status / append_followup_log 工具
+   * （让 AI 在跟进会话里能改任务状态/追加跟进日志，走二次确认）。
+   */
+  conversationType?: 'normal' | 'followup'
 }
 
 // ---------- 当前时间 ----------
@@ -363,9 +372,105 @@ function makeWebSearchTool(ctx: ToolContext): ToolRegistration {
 }
 
 // ---------- 工具组装入口 ----------
+// ---------- M6：任务状态修改工具（仅跟进会话注册，走二次确认） ----------
+
+const STATUS_ZH: Record<TaskStatus, string> = {
+  todo: '待办',
+  in_progress: '进行中',
+  done: '已完成',
+}
+
+/** update_task_status：改任务状态。状态修改类 FC 必须二次确认（AGENTS.md §4 红线）。 */
+function makeUpdateTaskStatusTool(): ToolRegistration {
+  return {
+    def: {
+      type: 'function',
+      function: {
+        name: 'update_task_status',
+        description:
+          '更新任务状态（todo/in_progress/done）。仅用于跟进会话中根据用户反馈改任务状态。改状态前必须征得用户确认。',
+        parameters: {
+          type: 'object',
+          properties: {
+            taskId: { type: 'string', description: '任务 ID' },
+            status: { type: 'string', enum: ['todo', 'in_progress', 'done'], description: '新状态' },
+          },
+          required: ['taskId', 'status'],
+        },
+      },
+    },
+    handler: async (args) => {
+      const taskId = String(args.taskId ?? '')
+      const status = String(args.status ?? '') as TaskStatus
+      if (!['todo', 'in_progress', 'done'].includes(status)) {
+        return { kind: 'result', value: JSON.stringify({ error: '非法状态' }) }
+      }
+      const row = getDb().select().from(tasks).where(eq(tasks.id, taskId)).get()
+      if (!row) return { kind: 'result', value: JSON.stringify({ error: '任务不存在' }) }
+
+      const prompt = `AI 要把任务「${row.title}」从「${STATUS_ZH[row.status]}」改为「${STATUS_ZH[status]}」，是否允许？`
+      return {
+        kind: 'confirm',
+        prompt,
+        action: async () => {
+          const now = Math.floor(Date.now() / 1000)
+          getDb().update(tasks).set({ status, updatedAt: now }).where(eq(tasks.id, taskId)).run()
+          return JSON.stringify({ ok: true, taskId, status })
+        },
+      }
+    },
+  }
+}
+
+/** append_followup_log：往任务的 followupLog 追加一条记录。追加式文本（CONTEXT.md「跟进日志」）。 */
+function makeAppendFollowupLogTool(): ToolRegistration {
+  return {
+    def: {
+      type: 'function',
+      function: {
+        name: 'append_followup_log',
+        description: '往任务的跟进日志追加一条记录（用户在跟进会话里的回复摘要）。追加前需用户确认。',
+        parameters: {
+          type: 'object',
+          properties: {
+            taskId: { type: 'string', description: '任务 ID' },
+            content: { type: 'string', description: '要追加的跟进记录内容' },
+          },
+          required: ['taskId', 'content'],
+        },
+      },
+    },
+    handler: async (args) => {
+      const taskId = String(args.taskId ?? '')
+      const content = String(args.content ?? '').trim()
+      if (!content) return { kind: 'result', value: JSON.stringify({ error: '内容不能为空' }) }
+      const row = getDb().select().from(tasks).where(eq(tasks.id, taskId)).get()
+      if (!row) return { kind: 'result', value: JSON.stringify({ error: '任务不存在' }) }
+
+      const prompt = `AI 要往任务「${row.title}」追加跟进记录：\n\n${content}\n\n是否允许？`
+      return {
+        kind: 'confirm',
+        prompt,
+        action: async () => {
+          const now = Math.floor(Date.now() / 1000)
+          const dateStr = new Date().toLocaleString('zh-CN')
+          // 追加式：旧内容 + 换行 + 新记录（带时间戳）
+          const newLog = row.followupLog ? `${row.followupLog}\n[${dateStr}] ${content}` : `[${dateStr}] ${content}`
+          getDb()
+            .update(tasks)
+            .set({ followupLog: newLog, updatedAt: now })
+            .where(eq(tasks.id, taskId))
+            .run()
+          return JSON.stringify({ ok: true, taskId })
+        },
+      }
+    },
+  }
+}
+
 export function assembleTools(ctx: ToolContext): ToolRegistration[] {
   // 始终注册文件工具（全盘模式 sources 为空，工具内部处理）
-  return [
+  const list: ToolRegistration[] = [
     getCurrentTimeTool,
     makeListDirsTool(ctx),
     makeListFilesTool(ctx),
@@ -374,4 +479,9 @@ export function assembleTools(ctx: ToolContext): ToolRegistration[] {
     makeWriteFileTool(ctx),
     makeWebSearchTool(ctx),
   ]
+  // M6：跟进会话额外注册任务状态修改工具（走二次确认）
+  if (ctx.conversationType === 'followup') {
+    list.push(makeUpdateTaskStatusTool(), makeAppendFollowupLogTool())
+  }
+  return list
 }

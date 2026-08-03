@@ -1,5 +1,5 @@
 import OpenAI from 'openai'
-import { eq, desc } from 'drizzle-orm'
+import { eq, desc, and, or, ne, lte, asc, isNotNull } from 'drizzle-orm'
 import { getDb } from '../db'
 import { providers, workDirs, tasks } from '../db/schema'
 import { getSecret } from '../secret'
@@ -109,6 +109,23 @@ export function listAllWorkDirs(): WorkDir[] {
 
 // ---------- Task CRUD（只读放这里，写操作在 ipc） ----------
 
+/** drizzle Task 行 → 对外 Task 类型（listTasks/listFollowupCandidates 共用）。 */
+function rowToTask(r: typeof tasks.$inferSelect): Task {
+  return {
+    id: r.id,
+    title: r.title,
+    description: r.description,
+    status: r.status,
+    priority: r.priority,
+    dueDate: r.dueDate,
+    source: r.source,
+    sourceConversationId: r.sourceConversationId,
+    followupLog: r.followupLog,
+    createdAt: r.createdAt,
+    updatedAt: r.updatedAt,
+  }
+}
+
 /** 列出全部 Task（任务页用）。按更新时间倒序（最近改的在前）。 */
 export function listTasks(): Task[] {
   return getDb()
@@ -116,17 +133,34 @@ export function listTasks(): Task[] {
     .from(tasks)
     .orderBy(desc(tasks.updatedAt))
     .all()
-    .map((r) => ({
-      id: r.id,
-      title: r.title,
-      description: r.description,
-      status: r.status,
-      priority: r.priority,
-      dueDate: r.dueDate,
-      source: r.source,
-      sourceConversationId: r.sourceConversationId,
-      followupLog: r.followupLog,
-      createdAt: r.createdAt,
-      updatedAt: r.updatedAt,
-    }))
+    .map(rowToTask)
+}
+
+/**
+ * 列出跟进候选任务（M6 调度器用，见 CONTEXT.md「到点流程」）。
+ * 条件：未完成 AND（今天到期/逾期 OR 高优先级）。
+ *   - status != 'done'
+ *   - (dueDate <= 今天 23:59:59) OR (priority = 'high')
+ * 按 dueDate 升序（最紧的在前；无 dueDate 的 high 优先级排后）。
+ */
+export function listFollowupCandidates(): Task[] {
+  // 今天 23:59:59 的 Unix 秒
+  const endOfToday = Math.floor(new Date().setHours(23, 59, 59, 999) / 1000)
+  return getDb()
+    .select()
+    .from(tasks)
+    .where(
+      and(
+        ne(tasks.status, 'done'),
+        or(
+          // 今天到期 + 逾期（dueDate 非空且 <= 今天末）
+          and(isNotNull(tasks.dueDate), lte(tasks.dueDate, endOfToday)),
+          // 高优先级未完成（即使无 dueDate 也跟）
+          eq(tasks.priority, 'high'),
+        ),
+      ),
+    )
+    .orderBy(asc(tasks.dueDate))
+    .all()
+    .map(rowToTask)
 }

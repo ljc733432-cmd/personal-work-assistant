@@ -19,6 +19,7 @@ import {
   listEnabledWorkDirs,
   listAllWorkDirs,
   listTasks,
+  listFollowupCandidates,
 } from '../services/providers/factory'
 import {
   listConversations,
@@ -442,6 +443,15 @@ function registerChatHandlers() {
         },
         // 联网搜索配置：动态读取（设置页改了立即生效，无配置返回 null 走降级）
         getActiveSearchConfig: () => getActiveSearchConfig(),
+        // M6：会话类型（followup 时额外注册任务状态修改工具）
+        conversationType: (() => {
+          const conv = getDb()
+            .select()
+            .from(conversations)
+            .where(eq(conversations.id, params.conversationId))
+            .get()
+          return conv?.type ?? 'normal'
+        })(),
       }
 
       const tools = params.enableTools ? assembleTools(ctx) : undefined
@@ -471,10 +481,37 @@ function registerChatHandlers() {
         win.webContents.send('chat:truncated', { reqId, dropped })
       }
 
+      // M6：跟进会话注入系统提示，引导 AI 用 update_task_status / append_followup_log 工具。
+      // 关键：必须把候选任务的 ID + 标题列出来，否则 AI 拿不到 taskId 无法调工具。
+      const messagesForModel =
+        ctx.conversationType === 'followup'
+          ? (() => {
+              const candidates = listFollowupCandidates()
+              const taskList = candidates
+                .map((t) => `- ID: ${t.id} | 标题: ${t.title} | 状态: ${t.status} | 优先级: ${t.priority}`)
+                .join('\n')
+              return [
+                {
+                  role: 'system' as const,
+                  content:
+                    '这是一个跟进会话。用户会回复任务的进展。\n\n' +
+                    '当前待跟进任务（含 ID，调工具时用这个 ID）：\n' +
+                    taskList +
+                    '\n\n规则：\n' +
+                    '1. 当用户表示某任务已完成/进行中时，调用 update_task_status(taskId, status) 更新状态（会弹确认给用户）。\n' +
+                    '2. 根据用户回复的内容匹配上面的任务标题来确定 taskId，不要问用户要 ID。\n' +
+                    '3. 如果用户补充了跟进信息，可调用 append_followup_log(taskId, content) 记录。\n' +
+                    '4. 没有匹配的任务时正常对话，不要强行调工具。',
+                },
+                ...truncated,
+              ]
+            })()
+          : truncated
+
       const result = await chatWithProvider({
         client,
         model,
-        messages: truncated,
+        messages: messagesForModel,
         tools,
         onToken,
         onToolCall,
