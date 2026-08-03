@@ -17,7 +17,9 @@
     "db:studio": "drizzle-kit studio"
   },
   "dependencies": {
-    "@fontsource/inter": "^5.3.0",
+    "@fontsource-variable/space-grotesk": "^5.3.0",
+    "@fontsource/dm-sans": "^5.3.0",
+    "@phosphor-icons/react": "^2.1.10",
     "better-sqlite3": "^13.0.2",
     "docx": "^9.7.1",
     "drizzle-orm": "^0.36.4",
