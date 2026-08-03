@@ -67,11 +67,14 @@ function ToolCard({
       onClick={onClick}
       disabled={!onClick}
       className={cn(
-        'flex flex-col items-start gap-2 border border-border bg-card p-4 text-left transition-colors',
-        onClick ? 'hover:bg-accent/5' : 'cursor-not-allowed opacity-60',
+        'group flex flex-col items-start gap-3 rounded-lg border border-border bg-card p-5 text-left shadow-sm transition-all duration-200',
+        onClick ? 'hover:-translate-y-0.5 hover:shadow-md' : 'cursor-not-allowed opacity-60',
       )}
     >
-      <Icon size={20} className="text-accent" />
+      {/* 图标容器：duotone 大图标 + accent 渐变背景（品牌感）*/}
+      <div className="flex h-12 w-12 items-center justify-center rounded-xl bg-accent/10 transition-colors group-hover:bg-accent/15">
+        <Icon size={26} weight="duotone" className="text-accent" />
+      </div>
       <div className="font-medium">{title}</div>
       <div className="text-xs text-muted-foreground">{desc}</div>
     </button>

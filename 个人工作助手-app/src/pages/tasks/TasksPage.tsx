@@ -1,10 +1,11 @@
 import { useEffect, useMemo, useState } from 'react'
-import { Check, Plus } from '@/components/ui/icons'
+import { Check, Plus, CheckSquare } from '@/components/ui/icons'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { Textarea } from '@/components/ui/textarea'
 import { Card, CardContent } from '@/components/ui/card'
+import { EmptyState } from '@/components/ui/EmptyState'
 import { useTasksStore } from '@/stores/tasks'
 import type { Task, TaskInput, TaskPriority, TaskStatus } from '@/types'
 
@@ -74,11 +75,11 @@ export function TasksPage() {
         </div>
 
         {filtered.length === 0 && (
-          <Card className="border-dashed bg-muted/30">
-            <CardContent className="py-10 text-center text-sm text-muted-foreground">
-              {tasks.length === 0 ? '还没有任务。在下方添加第一个。' : '该筛选下没有任务。'}
-            </CardContent>
-          </Card>
+          <EmptyState
+            icon={CheckSquare}
+            title={tasks.length === 0 ? '还没有任务' : '该筛选下没有任务'}
+            hint={tasks.length === 0 ? '点下方「添加任务」开始，或在对话里说「我明天要交报告」让 AI 抽取' : '换个筛选条件试试'}
+          />
         )}
 
         {filtered.map((t) => (

@@ -4,6 +4,7 @@ import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Textarea } from '@/components/ui/textarea'
 import { Markdown } from '@/components/Markdown'
+import { EmptyState } from '@/components/ui/EmptyState'
 import { useNotesStore } from '@/stores/notes'
 import { invoke } from '@/lib/ipc'
 import { cn } from '@/lib/utils'
@@ -202,10 +203,11 @@ export function NotesPage() {
             </div>
           </>
         ) : (
-          <div className="flex h-full flex-col items-center justify-center gap-2 text-muted-foreground">
-            <FileText size={40} className="text-muted-foreground/40" />
-            <div className="text-sm">从左侧选择一条笔记，或点「新建笔记」开始</div>
-          </div>
+          <EmptyState
+            icon={FileText}
+            title="选择一条笔记"
+            hint="从左侧选一条笔记开始编辑，或点「新建笔记」创建。也可在对话里说「把这段存成笔记」让 AI 帮你记"
+          />
         )}
       </div>
     </div>
