@@ -11,6 +11,7 @@
  */
 export {
   // 导航/操作类（功能位，regular weight，由 IconContext 全局默认）
+  HouseIcon as House, // 概览首页
   ChatCircleIcon as MessageSquare, // 对话
   ChecksIcon as CheckSquare, // 任务（复数勾选，区别于单 Check）
   NotePencilIcon as StickyNote, // 笔记

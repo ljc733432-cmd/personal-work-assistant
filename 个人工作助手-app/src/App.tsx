@@ -1,5 +1,14 @@
-import { useEffect, useState } from 'react'
-import { MessageSquare, CheckSquare, Settings, StickyNote, Wrench, Sun, Moon } from '@/components/ui/icons'
+import { useEffect } from 'react'
+import {
+  House,
+  MessageSquare,
+  CheckSquare,
+  Settings,
+  StickyNote,
+  Wrench,
+  Sun,
+  Moon,
+} from '@/components/ui/icons'
 import { cn } from '@/lib/utils'
 import { on } from '@/lib/ipc'
 import { useChatStore } from '@/stores/chat'
@@ -10,14 +19,15 @@ import { SettingsPage } from '@/pages/settings/SettingsPage'
 import { TasksPage } from '@/pages/tasks/TasksPage'
 import { ToolsPage } from '@/pages/tools/ToolsPage'
 import { NotesPage } from '@/pages/notes/NotesPage'
+import { OverviewPage } from '@/pages/overview/OverviewPage'
+import { useNavStore, type Tab } from '@/pages/overview/nav'
 
-// v1.2：导航从 3 项扩到 5 项（对话/任务/笔记/工具/设置）。
-// 笔记页与工具页（M12.5~M12.9）暂未实现，先占位渲染空状态，
-// 后续里程碑填充。主题切换按钮（底部 Sun/Moon）随 M12.4 主题 store 一起加。
-type Tab = 'chat' | 'tasks' | 'notes' | 'tools' | 'settings'
+// v1.3：导航 6 项（概览/对话/任务/笔记/工具/设置）。默认首页改为概览。
+// 导航 store 化（useNavStore），跨页跳转（OverviewPage 快捷入口）用 setTab。
 
 function App() {
-  const [tab, setTab] = useState<Tab>('chat')
+  const tab = useNavStore((s) => s.tab)
+  const setTab = useNavStore((s) => s.setTab)
   const resolved = useThemeStore((s) => s.resolved)
   const setMode = useThemeStore((s) => s.setMode)
 
@@ -26,23 +36,24 @@ function App() {
     return on('followup:open', (...args) => {
       const ev = args[0] as { conversationId: string }
       setTab('chat')
-      // 切到跟进会话（store 会按需 hydrate 历史，能看到 AI 的问候消息）
       useChatStore.getState().switchConversation(ev.conversationId).catch(() => {})
     })
-  }, [])
+  }, [setTab])
 
   // v1.2：system 模式下监听系统主题变化，实时跟随
   useEffect(() => startSystemThemeWatcher(), [])
 
-  // 底部主题按钮：点击在 light/dark 间切换（system 选项在设置页选）
   const toggleTheme = () => {
     void setMode(resolved === 'dark' ? 'light' : 'dark')
   }
 
   return (
     <div className="flex h-screen w-screen overflow-hidden bg-background">
-      {/* 侧栏：64px 纯图标，hairline 分隔分组（PRD §12.3）*/}
-      <nav className="flex w-16 flex-col items-center gap-1 border-r bg-card py-4">
+      {/* 侧栏（v1.3 Soft UI：bg-surface-2 + 右侧 shadow 分隔）*/}
+      <nav className="flex w-16 flex-col items-center gap-1 border-r bg-surface-2 py-4 shadow-sm">
+        <NavBtn active={tab === 'overview'} onClick={() => setTab('overview')} label="概览">
+          <House size={20} />
+        </NavBtn>
         <NavBtn active={tab === 'chat'} onClick={() => setTab('chat')} label="对话">
           <MessageSquare size={20} />
         </NavBtn>
@@ -62,28 +73,30 @@ function App() {
           <Settings size={20} />
         </NavBtn>
 
-        {/* M12.6 番茄钟常驻小部件（PRD §12.3）*/}
+        {/* M12.6 番茄钟常驻小部件 */}
         <div className="mt-2 mb-2">
           <PomodoroWidget />
         </div>
 
-        {/* 底部主题切换：light/dark 间切换（system 在设置页选） */}
+        {/* 底部主题切换 */}
         <button
           onClick={toggleTheme}
           title={resolved === 'dark' ? '切换到浅色' : '切换到深色'}
-          className="mt-auto mb-2 flex h-10 w-10 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-accent"
+          className="mt-auto mb-2 flex h-10 w-10 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-surface-3"
         >
           {resolved === 'dark' ? <Sun size={20} /> : <Moon size={20} />}
         </button>
 
         <div className="px-2 text-center text-[10px] leading-tight text-muted-foreground">
-          <div>v1.2</div>
+          <div>v1.3</div>
         </div>
       </nav>
 
       {/* 主区 */}
       <main className="flex-1 overflow-hidden">
-        {tab === 'chat' ? (
+        {tab === 'overview' ? (
+          <OverviewPage />
+        ) : tab === 'chat' ? (
           <ChatPage />
         ) : tab === 'tasks' ? (
           <TasksPage />
@@ -114,9 +127,12 @@ function NavBtn({
     <button
       onClick={onClick}
       title={label}
+      // v1.3 Soft UI：激活态用 accent 微背景 + shadow-xs（浮起感），非激活 hover surface-3
       className={cn(
-        'flex h-10 w-10 items-center justify-center rounded-md transition-colors',
-        active ? 'bg-primary text-primary-foreground' : 'text-muted-foreground hover:bg-accent',
+        'flex h-10 w-10 items-center justify-center rounded-md transition-all duration-200 active:scale-95',
+        active
+          ? 'bg-accent/10 text-accent shadow-xs'
+          : 'text-muted-foreground hover:bg-surface-3 hover:text-foreground',
       )}
     >
       {children}
