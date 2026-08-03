@@ -82,11 +82,15 @@
   font-family: ui-monospace, "SF Mono", Menlo, Consolas, monospace;
   font-size: 0.85em;
 }
-/* 行内 code */
+/* 行内 code：用半透明背景 + 细边框，在白底/蓝底气泡里都不突兀 */
 .msg-markdown :not(pre) > code {
-  padding: 0.15em 0.4em;
+  padding: 0.1em 0.35em;
   border-radius: 4px;
-  background: hsl(var(--muted));
+  background: currentColor;
+  background-color: rgba(128, 128, 128, 0.18);
+  border: 1px solid rgba(128, 128, 128, 0.22);
+  white-space: break-spaces;
+  word-break: break-all;
 }
 /* 代码块 */
 .msg-markdown pre {

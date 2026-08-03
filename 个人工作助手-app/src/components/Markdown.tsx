@@ -41,6 +41,8 @@ function CodeBlock({ className, children }: { className?: string; children?: Rea
 export const Markdown = memo(function Markdown({ content }: { content: string }) {
   const components = useMemo(
     () => ({
+      // 段落用 div 而非 p：避免 <p> 嵌套 <pre>（代码块）触发 HTML 非法嵌套报错
+      p: ({ node, ...props }: any) => <div {...props} />,
       // 所有链接外开（安全：渲染层无 nodeIntegration，配合 main 的 setWindowOpenHandler）
       a: ({ node, ...props }: any) => <a {...props} target="_blank" rel="noreferrer" />,
       code: ({ inline, className, children }: any) =>
