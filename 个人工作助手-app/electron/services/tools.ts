@@ -2,6 +2,12 @@ import type { ToolRegistration } from './providers/types'
 import type { AccessibleDir } from './systemDirs'
 import { randomUUID } from 'node:crypto'
 import {
+  createNote,
+  searchNotes,
+  getNote,
+  updateNote,
+} from './notes/noteStore'
+import {
   listFiles,
   readFileContent,
   findFiles,
@@ -482,6 +488,12 @@ export function assembleTools(ctx: ToolContext): ToolRegistration[] {
     // M12.5：提醒（A 轨 FC）。无副作用，直接入库，不走二次确认
     // （PRD §13.2：提醒区别于任务，响一下就完，可随时删，不需确认）。
     makeSetReminderTool(),
+    // M12.7：快速笔记（A 轨 FC）。create/search/read 直接返回，
+    // update 走二次确认（覆盖原内容，AGENTS.md 红线）。
+    makeCreateNoteTool(),
+    makeSearchNotesTool(),
+    makeReadNoteTool(),
+    makeUpdateNoteTool(),
   ]
   // M6：跟进会话额外注册任务状态修改工具（走二次确认）
   if (ctx.conversationType === 'followup') {
@@ -545,6 +557,176 @@ function makeSetReminderTool(): ToolRegistration {
           triggerAt: trigger,
           message: `已设置提醒：${trigger} - ${content}`,
         }),
+      }
+    },
+  }
+}
+
+// ---------- 快速笔记（M12.7 v1.2 A 轨 FC） ----------
+// 见 PRD §13.2 工具 1。笔记存纯 .md 文件（noteStore），自动入白名单。
+// create_note：新建（无副作用，直接入库）；update_note：覆盖，走二次确认。
+
+function makeCreateNoteTool(): ToolRegistration {
+  return {
+    def: {
+      type: 'function',
+      function: {
+        name: 'create_note',
+        description:
+          '把内容存成一条笔记（Markdown 文件）。当用户说"把这段存成笔记"' +
+          '"记录一下"或需要保存对话要点时调用。新建不覆盖，无副作用。',
+        parameters: {
+          type: 'object',
+          properties: {
+            title: { type: 'string', description: '笔记标题（简短，会成为文件名）' },
+            content: {
+              type: 'string',
+              description: '笔记正文（Markdown）。应包含完整内容，不要省略。',
+            },
+            tags: {
+              type: 'array',
+              items: { type: 'string' },
+              description: '可选标签数组，如 ["工作","周报"]',
+            },
+          },
+          required: ['title', 'content'],
+        },
+      },
+    },
+    handler: (args) => {
+      const title = String(args.title ?? '').trim()
+      const content = String(args.content ?? '')
+      if (!title) return { kind: 'result', value: JSON.stringify({ error: 'title 不能为空' }) }
+      const tagsRaw = Array.isArray(args.tags) ? (args.tags as unknown[]).map(String) : []
+      const note = createNote({ title, content, tags: tagsRaw })
+      return {
+        kind: 'result',
+        value: JSON.stringify({
+          ok: true,
+          id: note.id,
+          title: note.title,
+          fileName: note.fileName,
+          message: `已创建笔记「${note.title}」`,
+        }),
+      }
+    },
+  }
+}
+
+function makeSearchNotesTool(): ToolRegistration {
+  return {
+    def: {
+      type: 'function',
+      function: {
+        name: 'search_notes',
+        description:
+          '全文搜索已有笔记（标题 + 正文，大小写不敏感）。当用户问"我之前写过 X 吗"' +
+          '或需要查找历史笔记时调用。返回匹配笔记的标题 + 摘要列表。',
+        parameters: {
+          type: 'object',
+          properties: {
+            query: { type: 'string', description: '搜索关键词' },
+          },
+          required: ['query'],
+        },
+      },
+    },
+    handler: (args) => {
+      const query = String(args.query ?? '').trim()
+      if (!query) return { kind: 'result', value: JSON.stringify({ error: 'query 不能为空' }) }
+      const hits = searchNotes(query)
+      return {
+        kind: 'result',
+        value: JSON.stringify({
+          ok: true,
+          count: hits.length,
+          hits: hits.slice(0, 10), // 限制 10 条避免上下文过长
+          message: hits.length === 0 ? `未找到含「${query}」的笔记` : `找到 ${hits.length} 条`,
+        }),
+      }
+    },
+  }
+}
+
+function makeReadNoteTool(): ToolRegistration {
+  return {
+    def: {
+      type: 'function',
+      function: {
+        name: 'read_note',
+        description: '按 id 读取一条笔记的完整内容。需要先通过 search_notes 拿到 id。',
+        parameters: {
+          type: 'object',
+          properties: {
+            noteId: { type: 'string', description: '笔记 id（search_notes 返回的）' },
+          },
+          required: ['noteId'],
+        },
+      },
+    },
+    handler: (args) => {
+      const id = String(args.noteId ?? '').trim()
+      const note = getNote(id)
+      if (!note) return { kind: 'result', value: JSON.stringify({ error: `笔记 ${id} 不存在` }) }
+      return {
+        kind: 'result',
+        value: JSON.stringify({
+          ok: true,
+          id: note.id,
+          title: note.title,
+          tags: note.tags,
+          content: note.content,
+          updatedAt: note.updatedAt,
+        }),
+      }
+    },
+  }
+}
+
+function makeUpdateNoteTool(): ToolRegistration {
+  return {
+    def: {
+      type: 'function',
+      function: {
+        name: 'update_note',
+        description:
+          '更新一条笔记（覆盖内容）。会覆盖原笔记，必须征得用户确认。' +
+          '需先通过 search_notes / read_note 拿到 noteId。',
+        parameters: {
+          type: 'object',
+          properties: {
+            noteId: { type: 'string', description: '笔记 id' },
+            title: { type: 'string', description: '新标题（不改可不传）' },
+            content: { type: 'string', description: '新正文（覆盖，要完整不要省略）' },
+            tags: { type: 'array', items: { type: 'string' }, description: '新标签（覆盖）' },
+          },
+          required: ['noteId', 'content'],
+        },
+      },
+    },
+    handler: (args) => {
+      const id = String(args.noteId ?? '').trim()
+      const existing = getNote(id)
+      if (!existing) return { kind: 'result', value: JSON.stringify({ error: `笔记 ${id} 不存在` }) }
+      // 覆盖 → 走二次确认（AGENTS.md 红线：write 类工具必须 confirm）
+      const newTitle = args.title != null ? String(args.title) : existing.title
+      return {
+        kind: 'confirm',
+        prompt: `AI 要更新笔记「${existing.title}」（覆盖原内容），是否允许？`,
+        action: async () => {
+          const updated = updateNote(id, {
+            title: newTitle,
+            content: String(args.content ?? ''),
+            tags: Array.isArray(args.tags) ? (args.tags as unknown[]).map(String) : existing.tags,
+          })
+          if (!updated) return JSON.stringify({ error: '更新失败' })
+          return JSON.stringify({
+            ok: true,
+            id: updated.id,
+            title: updated.title,
+            message: `笔记「${updated.title}」已更新`,
+          })
+        },
       }
     },
   }

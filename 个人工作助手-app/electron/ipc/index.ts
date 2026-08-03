@@ -31,6 +31,15 @@ import {
 } from '../services/conversation/factory'
 import { listSearchProviders, getActiveSearchConfig } from '../services/search/factory'
 import { pingTavily } from '../services/searchTools'
+import {
+  listNotes,
+  getNote,
+  createNote,
+  updateNote,
+  deleteNote,
+  searchNotes,
+} from '../services/notes/noteStore'
+import { getNotesDir, setNotesDir } from '../services/notes/config'
 import { chatWithProvider, type ChatResult } from '../services/providers/chat'
 import { truncateByTokenBudget } from '../services/providers/truncate'
 import { extractTasks } from '../services/taskExtractor'
@@ -55,6 +64,9 @@ import type {
   ReminderInput,
   PomodoroSession,
   PomodoroRecordInput,
+  Note,
+  NoteInput,
+  NoteSearchHit,
   Conversation,
   ConversationInput,
   ConversationMessage,
@@ -401,7 +413,7 @@ function registerChatHandlers() {
       const ac = new AbortController()
       abortMap.set(reqId, ac)
 
-      // 构建 sources = 系统位置 + 启用的预填 workDirs + 会话已确认目录
+      // 构建 sources = 系统位置 + 启用的预填 workDirs + 笔记库目录 + 会话已确认目录
       const buildSources = (): AccessibleDir[] => {
         const list: AccessibleDir[] = []
         // 系统位置（文档/桌面/下载，只读）
@@ -418,6 +430,11 @@ function registerChatHandlers() {
               mode: wd.mode,
             })
           }
+        }
+        // M12.7：笔记库目录（readwrite，自动入白名单，PRD §13.2 无需用户额外配）
+        const notesDir = getNotesDir()
+        if (!list.some((x) => samePath(x.path, notesDir))) {
+          list.push({ label: '笔记库', path: notesDir, source: 'workdir', mode: 'readwrite' })
         }
         // 会话已确认读取（只读，会话级）
         for (const sd of sessionApprovedDirs) {
@@ -851,6 +868,79 @@ function registerPomodoroHandlers() {
   })
 }
 
+// ---------- Note handlers（M12.7 v1.2 快速笔记，双轨） ----------
+// B 轨笔记页手动 CRUD + A 轨 FC（create/search/read/update）共享这套 IPC。
+// 存储：纯 .md 文件（noteStore），路径校验在 noteStore 内（笔记库目录内）。
+function registerNoteHandlers() {
+  ipcMain.handle('note:list', (): IpcResult<Note[]> => {
+    try {
+      return ok(listNotes())
+    } catch (e) {
+      return err(String(e))
+    }
+  })
+
+  ipcMain.handle('note:get', (_, id: string): IpcResult<Note | null> => {
+    try {
+      return ok(getNote(id))
+    } catch (e) {
+      return err(String(e))
+    }
+  })
+
+  ipcMain.handle('note:create', (_, input: NoteInput): IpcResult<Note> => {
+    try {
+      if (!input.title?.trim()) return err('title 不能为空')
+      return ok(createNote(input))
+    } catch (e) {
+      return err(String(e))
+    }
+  })
+
+  ipcMain.handle('note:update', (_, input: NoteInput): IpcResult<Note | null> => {
+    try {
+      if (!input.id) return err('更新笔记需传 id')
+      return ok(updateNote(input.id, input))
+    } catch (e) {
+      return err(String(e))
+    }
+  })
+
+  ipcMain.handle('note:delete', (_, id: string): IpcResult<true> => {
+    try {
+      deleteNote(id)
+      return ok(true)
+    } catch (e) {
+      return err(String(e))
+    }
+  })
+
+  ipcMain.handle('note:search', (_, query: string): IpcResult<NoteSearchHit[]> => {
+    try {
+      return ok(searchNotes(query))
+    } catch (e) {
+      return err(String(e))
+    }
+  })
+
+  // 笔记库目录配置（设置页 + FC 工具都要读）
+  ipcMain.handle('note:getDir', (): IpcResult<string> => {
+    try {
+      return ok(getNotesDir())
+    } catch (e) {
+      return err(String(e))
+    }
+  })
+
+  ipcMain.handle('note:setDir', (_, dir: string): IpcResult<string> => {
+    try {
+      return ok(setNotesDir(dir))
+    } catch (e) {
+      return err(String(e))
+    }
+  })
+}
+
 function registerDbHandlers() {
   ipcMain.handle('db:health', (): IpcResult<{ ok: boolean; dbPath: string; detail: string }> => {
     return ok(dbHealthCheck())
@@ -1003,6 +1093,7 @@ export function registerIpcHandlers() {
   registerTaskHandlers()
   registerReminderHandlers()
   registerPomodoroHandlers()
+  registerNoteHandlers()
   registerConversationHandlers()
   registerDbHandlers()
   registerMetaHandlers()

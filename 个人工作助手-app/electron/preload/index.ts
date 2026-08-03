@@ -39,6 +39,14 @@ const ALLOWED_INVOKE = [
   'reminder:delete',        // 删除提醒
   'pomodoro:record',        // 记录一次番茄钟（M12.6 v1.2）
   'pomodoro:list',          // 列番茄钟历史
+  'note:list',              // 列笔记（M12.7 v1.2）
+  'note:get',               // 读单条笔记
+  'note:create',            // 新建笔记
+  'note:update',            // 更新笔记
+  'note:delete',            // 删除笔记
+  'note:search',            // 全文搜笔记
+  'note:getDir',            // 读笔记库目录
+  'note:setDir',            // 设笔记库目录
   'conversation:list',      // 列会话（侧栏，M2）
   'conversation:create',    // 新建会话
   'conversation:rename',    // 重命名会话

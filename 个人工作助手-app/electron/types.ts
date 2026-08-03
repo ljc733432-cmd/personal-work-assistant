@@ -207,6 +207,33 @@ export interface PomodoroRecordInput {
   completed?: boolean
 }
 
+// ---------- Note：快速笔记（M12.7 v1.2 工具扩展） ----------
+// 见 PRD §13.2 工具 1。纯 .md 文件 + frontmatter，不入库。
+export interface Note {
+  id: string
+  title: string
+  tags: string[]
+  content: string // 正文 Markdown（不含 frontmatter）
+  createdAt: number
+  updatedAt: number
+  fileName: string
+}
+
+export interface NoteInput {
+  id?: string
+  title: string
+  content?: string
+  tags?: string[]
+}
+
+export interface NoteSearchHit {
+  id: string
+  title: string
+  fileName: string
+  snippet: string
+  updatedAt: number
+}
+
 export interface ConversationInput {
   id?: string
   title?: string // 可空：首次创建可由首条消息回填

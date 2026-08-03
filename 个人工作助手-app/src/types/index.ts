@@ -190,6 +190,32 @@ export interface PomodoroRecordInput {
   completed?: boolean
 }
 
+// ---------- Note：快速笔记（M12.7 v1.2 工具扩展） ----------
+export interface Note {
+  id: string
+  title: string
+  tags: string[]
+  content: string
+  createdAt: number
+  updatedAt: number
+  fileName: string
+}
+
+export interface NoteInput {
+  id?: string
+  title: string
+  content?: string
+  tags?: string[]
+}
+
+export interface NoteSearchHit {
+  id: string
+  title: string
+  fileName: string
+  snippet: string
+  updatedAt: number
+}
+
 // ---------- TaskDraft：任务抽取草稿（M4） ----------
 // AI 从对话抽出的任务草稿，不直接入库，用户点"加入任务"才落库。
 export interface TaskDraft {
