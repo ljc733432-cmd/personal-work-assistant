@@ -5,69 +5,60 @@ import { Card } from '@/components/ui/card'
 import { Markdown } from '@/components/Markdown'
 import { ConfirmDialog } from '@/components/ui/dialog'
 import { useProvidersStore } from '@/stores/providers'
+import { useChatStore } from '@/stores/chat'
+import { ConversationList } from './ConversationList'
 import { invoke, on, send } from '@/lib/ipc'
-import type { ChatMessage, ConfirmRequest, Conversation, ConversationMessage } from '@/types'
+import type { ChatMessage, ConfirmRequest } from '@/types'
 
 let _seq = 0
 const genId = () => `m${Date.now()}_${_seq++}`
 
-/** DB 持久化消息 → 组件内存消息（M2-Step3 hydrate 用）。 */
-function dbMsgToChatMessage(m: ConversationMessage): ChatMessage {
-  return {
-    id: m.id, // 复用 DB 的 id，避免 hydrate 后再发消息时 id 冲突
-    role: m.role,
-    content: m.content,
-    toolCalls: m.toolCalls ?? undefined,
-  }
-}
+// 模块级空数组常量：selector 返回它时引用稳定，避免 useSyncExternalStore 无限循环。
+// （zustand 在 React 18 strict 下要求 getSnapshot 返回值引用不变。）
+const EMPTY_MESSAGES: ChatMessage[] = []
 
 export function ChatPage() {
   const { providers, refresh } = useProvidersStore()
   const [providerId, setProviderId] = useState<string>('')
   const [input, setInput] = useState('')
-  const [messages, setMessages] = useState<ChatMessage[]>([])
-  const [streaming, setStreaming] = useState(false)
   const [enableTools, setEnableTools] = useState(true) // 默认开 FC，验证 TV-1
-  const [error, setError] = useState<string | null>(null)
-  const [firstTokenMs, setFirstTokenMs] = useState<number | null>(null)
   const [confirmReq, setConfirmReq] = useState<ConfirmRequest | null>(null)
-  // M2-Step2 临时：单会话兜底（取第一个，没有就创建）。
-  // 多会话列表与切换是 Step5；这里先保证 conversationId 能传给主进程落库。
-  const [conversation, setConversation] = useState<Conversation | null>(null)
   const scrollRef = useRef<HTMLDivElement>(null)
+
+  // M2-Step4/6：会话、消息、流式元状态都从 store 读（per-conversation）。
+  // 注意：selector 不能返回内联新对象/数组（如 `?? []`），否则 useSyncExternalStore 无限循环。
+  const activeId = useChatStore((s) => s.activeId)
+  const convMessages = useChatStore((s) =>
+    s.activeId ? s.messagesByConv[s.activeId] : EMPTY_MESSAGES,
+  )
+  const messages = convMessages ?? EMPTY_MESSAGES
+  // active 会话的流式元状态（per-conversation，Step6：切到 B 时 B 不被 A 的流式锁住）
+  const meta = useChatStore((s) => (s.activeId ? s.metaByConv[s.activeId] : undefined))
+  const streaming = meta?.streaming ?? false
+  const firstTokenMs = meta?.firstTokenMs ?? null
+  const error = meta?.error ?? null
+  const truncatedNotice = meta?.truncatedNotice ?? null
+  const loadConversations = useChatStore((s) => s.loadConversations)
+  const appendMessage = useChatStore((s) => s.appendMessage)
+  const updateMessage = useChatStore((s) => s.updateMessage)
+  const removeMessage = useChatStore((s) => s.removeMessage)
+  const setMeta = useChatStore((s) => s.setMeta)
 
   useEffect(() => {
     refresh()
   }, [refresh])
 
-  // M2-Step3：会话初始化（单会话兜底）+ 历史 hydrate。
-  // 多会话列表与切换是 Step5；这里先保证：重开应用能看到该会话的历史消息。
+  // 会话初始化（单会话兜底）+ 历史 hydrate —— 委托给 store。
   useEffect(() => {
-    let cancelled = false
     ;(async () => {
       try {
-        const list = await invoke<Conversation[]>('conversation:list')
-        let conv: Conversation | null = list[0] ?? null
-        if (!conv) {
-          conv = await invoke<Conversation>('conversation:create', {})
-        }
-        if (cancelled || !conv) return
-        setConversation(conv)
-        // hydrate 历史消息：DB 的 ConversationMessage → 组件 ChatMessage
-        const msgs = await invoke<ConversationMessage[]>('message:list', conv.id)
-        if (cancelled) return
-        if (msgs.length > 0) {
-          setMessages(msgs.map(dbMsgToChatMessage))
-        }
+        await loadConversations()
       } catch (e) {
         // 会话初始化失败不阻塞对话（主进程会兜底：conversationId 为空时落库跳过）
         console.error('[chat] 会话初始化失败', e)
       }
     })()
-    return () => {
-      cancelled = true
-    }
-  }, [])
+  }, [loadConversations])
 
   // 监听工具确认请求（write_file 覆盖等）—— 全局，整个组件生命周期
   useEffect(() => {
@@ -115,18 +106,21 @@ export function ChatPage() {
 
   const handleSend = async () => {
     if (!input.trim() || !providerId || streaming) return
-    if (!conversation) {
-      setError('会话未就绪，请稍候')
+    if (!activeId) {
+      setMeta(activeId ?? '', { error: '会话未就绪，请稍候' })
       return
     }
-    setError(null)
+    const convId = activeId // 捕获到局部，避免闭包内 activeId 变化影响
+    // 清该会话的 error + truncatedNotice + 置 streaming（per-conversation，Step6）
+    setMeta(convId, { error: null, streaming: true, firstTokenMs: null, truncatedNotice: null })
 
     const userMsg: ChatMessage = { id: genId(), role: 'user', content: input.trim() }
     const aiMsg: ChatMessage = { id: genId(), role: 'assistant', content: '', streaming: true }
     const history = [...messages, userMsg]
-    setMessages([...history, aiMsg])
+    // 乐观插入：user + 空 aiMsg（store 追加）
+    appendMessage(convId, userMsg)
+    appendMessage(convId, aiMsg)
     setInput('')
-    setStreaming(true)
 
     // ★ 关键：渲染层先生成 reqId，先订阅，再带 reqId 发起。
     // 旧版 reqId 在 invoke 返回后才知，会丢首字且无法取消。
@@ -136,41 +130,46 @@ export function ChatPage() {
     const offToken = on('chat:token', (...args) => {
       const ev = args[0] as { reqId: string; text: string }
       if (ev.reqId !== reqId) return
-      setMessages((cur) =>
-        cur.map((m) => (m.id === aiMsg.id ? { ...m, content: m.content + ev.text } : m)),
-      )
+      // content 拼接：读当前值 + 追加（store 不支持函数式 patch，手动读）
+      const cur = useChatStore.getState().getMessages(convId).find((m) => m.id === aiMsg.id)
+      if (cur) updateMessage(convId, aiMsg.id, { content: cur.content + ev.text })
     })
     const offFirstToken = on('chat:first_token', (...args) => {
       const ev = args[0] as { reqId: string; elapsedMs: number }
       if (ev.reqId !== reqId) return
-      setFirstTokenMs(ev.elapsedMs)
+      setMeta(convId, { firstTokenMs: ev.elapsedMs })
     })
     const offToolCall = on('chat:tool_call', (...args) => {
       const ev = args[0] as { reqId: string; name: string; args: string }
       if (ev.reqId !== reqId) return
       // 工具调用独立展示，不污染正文 content
-      setMessages((cur) =>
-        cur.map((m) =>
-          m.id === aiMsg.id
-            ? { ...m, toolCalls: [...(m.toolCalls ?? []), { name: ev.name, args: ev.args }] }
-            : m,
-        ),
-      )
+      const cur = useChatStore.getState().getMessages(convId).find((m) => m.id === aiMsg.id)
+      if (cur) {
+        updateMessage(convId, aiMsg.id, {
+          toolCalls: [...(cur.toolCalls ?? []), { name: ev.name, args: ev.args }],
+        })
+      }
     })
     const offDone = on('chat:done', (...args) => {
       const ev = args[0] as { reqId: string; cancelled?: boolean }
       if (ev.reqId !== reqId) return
       // 修现存 bug：done 时必须清掉 aiMsg.streaming，否则光标动画一直闪。
       // cancelled=true（用户点取消）也走这里，content 保留已生成的部分。
-      setMessages((cur) => cur.map((m) => (m.id === aiMsg.id ? { ...m, streaming: false } : m)))
+      updateMessage(convId, aiMsg.id, { streaming: false })
       cleanup()
     })
     const offError = on('chat:error', (...args) => {
       const ev = args[0] as { reqId: string; message: string }
       if (ev.reqId !== reqId) return
-      setError(ev.message)
-      setMessages((cur) => cur.filter((m) => m.id !== aiMsg.id))
+      setMeta(convId, { error: ev.message })
+      removeMessage(convId, aiMsg.id)
       cleanup()
+    })
+    // M2-Step7：截断提示（主进程丢弃了较早消息时推来，UI 要提示，禁忌静默丢）
+    const offTruncated = on('chat:truncated', (...args) => {
+      const ev = args[0] as { reqId: string; dropped: number }
+      if (ev.reqId !== reqId) return
+      setMeta(convId, { truncatedNotice: `已省略较早的 ${ev.dropped} 条消息（超出上下文预算）` })
     })
 
     const cleanup = () => {
@@ -179,10 +178,11 @@ export function ChatPage() {
       offToolCall()
       offDone()
       offError()
+      offTruncated()
       currentReqId.current = null
       activeCleanup.current = null
-      setStreaming(false)
-      setFirstTokenMs(null)
+      // 只清 streaming + firstTokenMs（保留 error + truncatedNotice，让用户切回还能看到）
+      setMeta(convId, { streaming: false, firstTokenMs: null })
     }
     activeCleanup.current = cleanup
 
@@ -191,12 +191,12 @@ export function ChatPage() {
         reqId,
         providerId,
         enableTools,
-        conversationId: conversation.id,
+        conversationId: convId,
         messages: history.map((m) => ({ role: m.role, content: m.content })),
       })
     } catch (e) {
-      setError(String(e))
-      setMessages((cur) => cur.map((m) => (m.id === aiMsg.id ? { ...m, streaming: false } : m)))
+      setMeta(convId, { error: String(e) })
+      updateMessage(convId, aiMsg.id, { streaming: false })
       cleanup()
     }
   }
@@ -211,7 +211,12 @@ export function ChatPage() {
   const enabledProviders = providers.filter((p) => p.enabled)
 
   return (
-    <div className="flex h-full flex-col">
+    <div className="flex h-full">
+      {/* 会话列表侧栏 */}
+      <ConversationList />
+
+      {/* 对话区 */}
+      <div className="flex flex-1 flex-col">
       {/* 顶栏 */}
       <div className="flex items-center gap-3 border-b bg-card px-4 py-2.5">
         <select
@@ -240,6 +245,9 @@ export function ChatPage() {
           </span>
         )}
         {error && <span className="text-xs text-destructive">{error}</span>}
+        {truncatedNotice && (
+          <span className="text-xs text-amber-600">{truncatedNotice}</span>
+        )}
         {streaming && (
           <span className="ml-auto animate-pulse text-xs text-muted-foreground">
             {firstTokenMs === null ? '思考中…' : '回复中…'}
@@ -309,6 +317,7 @@ export function ChatPage() {
         onConfirm={() => respondConfirm(true)}
         onCancel={() => respondConfirm(false)}
       />
+      </div>
     </div>
   )
 }

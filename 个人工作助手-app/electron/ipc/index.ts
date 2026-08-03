@@ -28,6 +28,7 @@ import {
 import { listSearchProviders, getActiveSearchConfig } from '../services/search/factory'
 import { pingTavily } from '../services/searchTools'
 import { chatWithProvider, type ChatResult } from '../services/providers/chat'
+import { truncateByTokenBudget } from '../services/providers/truncate'
 import { assembleTools, type ToolContext } from '../services/tools'
 import { getSystemDirs, type AccessibleDir } from '../services/systemDirs'
 import { PROVIDER_PRESETS } from '../services/providers/types'
@@ -459,10 +460,18 @@ function registerChatHandlers() {
         })
       }
 
+      // M2-Step7：上下文截断（按 token 预算，非条数）。
+      // 注意：截断只作用于「发给模型的历史」，不影响落库（落库的是完整历史 params.messages）。
+      const { messages: truncated, dropped } = truncateByTokenBudget(params.messages)
+      if (dropped > 0) {
+        // 禁忌：不静默丢历史。推事件让渲染层 UI 提示「已省略较早的 X 条」。
+        win.webContents.send('chat:truncated', { reqId, dropped })
+      }
+
       const result = await chatWithProvider({
         client,
         model,
-        messages: params.messages,
+        messages: truncated,
         tools,
         onToken,
         onToolCall,
