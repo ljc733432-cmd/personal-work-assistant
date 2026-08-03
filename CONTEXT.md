@@ -178,6 +178,33 @@ PRD §12.2.4 签名元素：无圆角矩形 + 左侧 2px role 色条。
 
 ---
 
+## D3. v1.3 UI 重造域（M13.1~M13.6）
+
+### **Soft UI（柔和阴影系统，v1.3）**
+ui-ux-pro-max skill 推荐的层次质感风格（ADR-018）。在 v1.2 冷调克制基础上叠加：
+- **多级 surface**：surface-1（页面底）/ surface-2（卡片层）/ surface-3（浮层），治「配色太素」。
+- **柔和阴影**：shadow-xs/sm/md/lg 多层漫射+近距投影，卡片有浮起感（非生硬投影）。
+- **适度圆角**：radius 0.5rem（v1.2 的 0.25rem 偏硬，Soft UI 需配柔和阴影）。
+- **不动电光蓝主色**，只加层次。
+
+### **概览页（Overview Page，v1.3 信息架构）**
+新增首页（M13.4），治「信息架构单一」。聚合今日任务/提醒/专注/笔记数据：
+- 品牌头部（问候 + 日期时间）+ 概览卡片网格 + 快捷入口 + 最近活动。
+- 默认首页从「对话」改为「概览」，导航 6 项。
+- 数据从现有 store 取，零新增 IPC。
+
+### **图标映射表（Icon Mapping，v1.3）**
+`src/components/ui/icons.ts`：lucide 名 → Phosphor 组件的语义化别名出口。
+- 业务文件统一从 `@/components/ui/icons` import，图标名保持（v1.2 别名兼容）。
+- 品牌位单点传 `weight="duotone"`（导航激活态/空状态/概览卡片/工具入口）。
+- **不要**直接从 `@phosphor-icons/react` import（绕过映射表失去统一维护点）。
+
+### **EmptyState（统一空状态，v1.3）**
+`src/components/ui/EmptyState.tsx`：Phosphor 64px duotone 大图标 + 标题 + 引导文案。
+- 全应用空状态走它，品牌一致。**不要**手写 div + 小图标做空状态。
+
+---
+
 ## E. 基础设施域
 
 ### **safeStorage**
@@ -229,3 +256,5 @@ PRD §7 验收优先级。P0 必做 = v1 完成；P1 可选。
 | 提醒 / 推送（指到点响一下的信号） | **Reminder**（区别于跟进=AI 主动扫任务+对话） |
 | 备忘录 / 文档 | **笔记（Notes）**（特指本地 .md 笔记库） |
 | 插件 / 扩展 | **双轨制**（FC 工具 + 手动页面的组合形态） |
+| 首页 / 主页 / dashboard | **概览页（Overview Page）**（v1.3 新增首页，聚合数据） |
+| 空状态 / 占位 | **EmptyState**（统一组件，Phosphor duotone 大图标） |
