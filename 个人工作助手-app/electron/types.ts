@@ -287,3 +287,17 @@ export interface MessageInsertInput {
   providerId?: string | null
   toolCalls?: MessageToolCall[] | null
 }
+
+// ---------- Dashboard：数据看板（v1.4 M14） ----------
+// messages 表可能大，activity 走主进程聚合，只回 date+count，不传 content 大字段。
+// date 形如 'YYYY-MM-DD'（SQLite date(unixepoch) 格式）。
+export interface ActivityPoint {
+  date: string
+  count: number
+}
+
+/** dashboard:activity 入参。fromSec/toSec 为 Unix 秒，闭区间。 */
+export interface ActivityQuery {
+  fromSec: number
+  toSec: number
+}

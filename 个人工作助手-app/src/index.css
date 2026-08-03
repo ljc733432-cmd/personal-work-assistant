@@ -188,6 +188,49 @@
   animation: stagger-in 0.3s ease-out both;
 }
 
+/* ===== v1.4 看板动效：fade-up 入场 + count-pulse + hero-glow ===== */
+/* 依据 ui-ux-pro-max skill：入场 reveal 用 opacity+translateY，stagger 0.08s，不超 8 子项 */
+@keyframes fade-up {
+  from { opacity: 0; transform: translateY(12px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+.animate-fade-up {
+  animation: fade-up 0.4s ease-out both;
+}
+/* 子项错峰：用内联 --i 控 delay，配合 .stagger-fade-up > * */
+.stagger-fade-up > * {
+  animation: fade-up 0.4s ease-out both;
+  animation-delay: calc(var(--i, 0) * 0.08s);
+}
+/* 无 --i 时用 nth-child 兜底错峰（前 8 项，skill 建议 ≤8）*/
+.stagger-fade-up > *:nth-child(1) { animation-delay: 0s; }
+.stagger-fade-up > *:nth-child(2) { animation-delay: 0.08s; }
+.stagger-fade-up > *:nth-child(3) { animation-delay: 0.16s; }
+.stagger-fade-up > *:nth-child(4) { animation-delay: 0.24s; }
+.stagger-fade-up > *:nth-child(5) { animation-delay: 0.32s; }
+.stagger-fade-up > *:nth-child(6) { animation-delay: 0.4s; }
+.stagger-fade-up > *:nth-child(7) { animation-delay: 0.48s; }
+.stagger-fade-up > *:nth-child(8) { animation-delay: 0.56s; }
+
+/* 数字 count-up 完成时的轻微脉冲（配合 useCountUp）*/
+@keyframes count-pulse {
+  0% { transform: scale(1); }
+  50% { transform: scale(1.04); }
+  100% { transform: scale(1); }
+}
+.count-pulse {
+  animation: count-pulse 0.3s ease-out;
+}
+
+/* 头部电光蓝径向光晕（单色蓝微光，非蓝紫渐变色块）*/
+.hero-glow {
+  background: radial-gradient(
+    ellipse 80% 60% at 50% 0%,
+    hsl(221 100% 50% / 0.08),
+    transparent 70%
+  );
+}
+
 /* 尊重系统减少动效设置（skill UX 准则）*/
 @media (prefers-reduced-motion: reduce) {
   *, *::before, *::after {

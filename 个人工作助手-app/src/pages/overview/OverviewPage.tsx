@@ -6,6 +6,7 @@ import { useTasksStore } from '@/stores/tasks'
 import { useNotesStore } from '@/stores/notes'
 import { useRemindersStore } from '@/stores/reminders'
 import { invoke } from '@/lib/ipc'
+import { useCountUp } from '@/lib/useCountUp'
 import type { PomodoroSession, Task, Note } from '@/types'
 
 /**
@@ -60,27 +61,30 @@ export function OverviewPage() {
   return (
     <div className="h-full overflow-y-auto">
       <div className="mx-auto max-w-5xl px-8 py-8">
-        {/* 品牌头部 */}
-        <header className="mb-8 flex items-end justify-between">
-          <div>
-            <div className="flex items-center gap-2 text-sm text-muted-foreground">
-              <Sparkles size={14} weight="fill" className="text-accent" />
-              个人工作助手
+        {/* 品牌头部（v1.5：电光蓝径向光晕 + 标题入场）*/}
+        <header className="relative mb-8 overflow-hidden">
+          <div className="hero-glow pointer-events-none absolute inset-0" aria-hidden />
+          <div className="relative flex items-end justify-between">
+            <div className="animate-fade-up">
+              <div className="flex items-center gap-2 text-sm text-muted-foreground">
+                <Sparkles size={14} weight="fill" className="text-accent" />
+                个人工作助手
+              </div>
+              <h1 className="mt-1 font-display text-3xl font-semibold tracking-tight">
+                {greeting}，今天专注什么？
+              </h1>
             </div>
-            <h1 className="mt-1 font-display text-3xl font-semibold tracking-tight">
-              {greeting}，今天专注什么？
-            </h1>
-          </div>
-          <div className="text-right text-sm text-muted-foreground">
-            <div>{new Date().toLocaleDateString('zh-CN', { month: 'long', day: 'numeric', weekday: 'long' })}</div>
-            <div className="font-mono tabular-nums">
-              {new Date().toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit' })}
+            <div className="text-right text-sm text-muted-foreground">
+              <div>{new Date().toLocaleDateString('zh-CN', { month: 'long', day: 'numeric', weekday: 'long' })}</div>
+              <div className="font-mono tabular-nums">
+                {new Date().toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit' })}
+              </div>
             </div>
           </div>
         </header>
 
-        {/* 今日概览卡片网格 */}
-        <section className="mb-8 grid grid-cols-2 gap-4 lg:grid-cols-4">
+        {/* 今日概览卡片网格（v1.5：stagger 入场 + count-up + hover）*/}
+        <section className="mb-8 grid grid-cols-2 gap-4 stagger-fade-up lg:grid-cols-4">
           <StatCard
             icon={CheckSquare}
             label="待办任务"
@@ -116,10 +120,10 @@ export function OverviewPage() {
           />
         </section>
 
-        {/* 快捷入口 */}
+        {/* 快捷入口（v1.5：stagger 入场 + hover）*/}
         <section className="mb-8">
           <h2 className="mb-3 text-sm font-medium uppercase tracking-wide text-muted-foreground">快捷入口</h2>
-          <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
+          <div className="stagger-fade-up grid grid-cols-2 gap-3 sm:grid-cols-4">
             <QuickAction icon={MessageSquare} label="开始对话" desc="问点什么" onClick={() => goto('chat')} />
             <QuickAction icon={CheckSquare} label="新建任务" desc="添加待办" onClick={() => goto('tasks')} />
             <QuickAction icon={StickyNote} label="写笔记" desc="记录想法" onClick={() => goto('notes')} />
@@ -186,14 +190,15 @@ function StatCard({
   onClick: () => void
 }) {
   const t = TONE_STYLE[tone]
+  const animated = useCountUp(value)
   return (
     <button onClick={onClick} className="text-left">
-      <Card className="cursor-pointer p-5">
+      <Card className="cursor-pointer p-5 transition-all duration-200 hover:-translate-y-1 hover:shadow-lg">
         <CardContent className="flex items-start justify-between p-0">
           <div>
             <div className="text-xs font-medium uppercase tracking-wide text-muted-foreground">{label}</div>
             <div className="mt-2 flex items-baseline gap-1">
-              <span className="font-display text-3xl font-semibold tabular-nums">{value}</span>
+              <span className="font-display text-3xl font-semibold tabular-nums">{animated}</span>
               {unit && <span className="text-sm text-muted-foreground">{unit}</span>}
             </div>
             <div className="mt-1 text-xs text-muted-foreground">{hint}</div>
@@ -220,7 +225,7 @@ function QuickAction({
 }) {
   return (
     <button onClick={onClick} className="text-left">
-      <Card className="cursor-pointer p-4">
+      <Card className="cursor-pointer p-4 transition-all duration-200 hover:-translate-y-1 hover:shadow-lg">
         <CardContent className="flex items-center gap-3 p-0">
           <div className="flex h-9 w-9 flex-shrink-0 items-center justify-center rounded-md bg-accent/10 text-accent">
             <Icon size={18} weight="duotone" />

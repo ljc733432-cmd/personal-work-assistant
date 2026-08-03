@@ -472,7 +472,7 @@ function MessageBubble({ msg }: { msg: ChatMessage }) {
   const label = isUser ? '我' : isTool ? '工具' : 'AI'
 
   return (
-    <div className={`flex gap-3 ${isUser ? 'flex-row-reverse' : 'flex-row'}`}>
+    <div className={`flex gap-3 animate-fade-up ${isUser ? 'flex-row-reverse' : 'flex-row'}`}>
       {/* 头像（v1.3：用户用 accent 渐变 + 阴影，AI 用 surface-3 + border）*/}
       <div
         className={`mt-0.5 flex h-7 w-7 flex-shrink-0 items-center justify-center rounded-full shadow-sm ${

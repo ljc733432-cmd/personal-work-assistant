@@ -1,6 +1,7 @@
 import { useEffect } from 'react'
 import {
   House,
+  Dashboard,
   MessageSquare,
   CheckSquare,
   Settings,
@@ -20,6 +21,7 @@ import { TasksPage } from '@/pages/tasks/TasksPage'
 import { ToolsPage } from '@/pages/tools/ToolsPage'
 import { NotesPage } from '@/pages/notes/NotesPage'
 import { OverviewPage } from '@/pages/overview/OverviewPage'
+import { DashboardPage } from '@/pages/dashboard/DashboardPage'
 import { useNavStore, type Tab } from '@/pages/overview/nav'
 
 // v1.3：导航 6 项（概览/对话/任务/笔记/工具/设置）。默认首页改为概览。
@@ -53,6 +55,9 @@ function App() {
       <nav className="flex w-16 flex-col items-center gap-1 border-r bg-surface-2 py-4 shadow-sm">
         <NavBtn active={tab === 'overview'} onClick={() => setTab('overview')} label="概览">
           <House size={20} />
+        </NavBtn>
+        <NavBtn active={tab === 'dashboard'} onClick={() => setTab('dashboard')} label="看板">
+          <Dashboard size={20} />
         </NavBtn>
         <NavBtn active={tab === 'chat'} onClick={() => setTab('chat')} label="对话">
           <MessageSquare size={20} />
@@ -96,6 +101,8 @@ function App() {
       <main className="flex-1 overflow-hidden">
         {tab === 'overview' ? (
           <OverviewPage />
+        ) : tab === 'dashboard' ? (
+          <DashboardPage />
         ) : tab === 'chat' ? (
           <ChatPage />
         ) : tab === 'tasks' ? (

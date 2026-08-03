@@ -205,6 +205,35 @@ ui-ux-pro-max skill 推荐的层次质感风格（ADR-018）。在 v1.2 冷调�
 
 ---
 
+## D4. v1.4 数据看板域（M14）
+
+### **Dashboard（数据看板，v1.4）**
+生产力分析页（PRD §16.5，ADR-020）。**与概览页的区别**：
+- **概览页（Overview Page）= 今日快照**：默认首页，今日数据 + 快捷入口，信息密度低。
+- **数据看板（Dashboard）= 历史趋势**：可切换 7天/30天/全部 的生产力分析（专注趋势、任务新建、状态分布、专注时段），多图 + 时间范围，信息密度高。
+- 两者互补不重复，分别独立 Tab（侧栏：概览 → 看板，数据展示组）。
+- **不要叫**："首页/统计页/报表"——Dashboard 特指历史趋势分析页。
+
+### **DashboardRange（时间范围，v1.4）**
+看板的时间筛选：`'7d' | '30d' | 'all'`。切换时所有图表 + StatCard 联动刷新。
+- pomodoro/tasks/notes 按 `startedAt`/`createdAt` 前端过滤（复用现有 list，全量拉取）。
+- all 模式图表不补零，只显示有数据的天。
+
+### **ActivityPoint（对话活跃度，v1.4）**
+messages 表按天聚合：`{ date: 'YYYY-MM-DD', count: number }`。
+- 走专属聚合 IPC `dashboard:activity`（三处同步），**只回 date+count，不传 content 大字段**（messages 表可能大，全量拉浪费）。
+- 主进程 `GROUP BY date(created_at,'unixepoch')` 聚合。
+
+### **图表模式（Chart Mode，v1.4）**
+看板图表分两组，用 SegmentedSwitcher 切换（省纵向空间，每屏只看 2 图）：
+- **趋势**：专注折线（每日专注分钟）+ 任务新建柱状（每日新建数）。
+- **分布**：任务状态饼图（todo/in_progress/done 占比）+ 专注时段柱状（深夜/早晨/下午/晚间）。
+
+### **SegmentedSwitcher（分段切换器，v1.4）**
+通用分段选择组件（DashboardPage 内）：选中态用 `bg-accent/10 + text-accent`（v1.3 红线规范）。复用给时间范围和图表模式切换，避免重复代码。
+
+---
+
 ## E. 基础设施域
 
 ### **safeStorage**
@@ -258,3 +287,4 @@ PRD §7 验收优先级。P0 必做 = v1 完成；P1 可选。
 | 插件 / 扩展 | **双轨制**（FC 工具 + 手动页面的组合形态） |
 | 首页 / 主页 / dashboard | **概览页（Overview Page）**（v1.3 新增首页，聚合数据） |
 | 空状态 / 占位 | **EmptyState**（统一组件，Phosphor duotone 大图标） |
+| 首页 / 统计页 / 报表 | **Dashboard**（v1.4 数据看板，历史趋势分析，区别于概览页今日快照） |

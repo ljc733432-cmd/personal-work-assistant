@@ -265,3 +265,20 @@ export interface ChatStreamEvent {
   args?: string
   message?: string
 }
+
+// ---------- Dashboard：数据看板（v1.4 M14） ----------
+// 见 CONTEXT.md「数据看板」。与 Overview Page 区别：Overview 是今日快照，Dashboard 是历史趋势。
+// messages 表可能大，activity 走主进程聚合 IPC，只回 date+count，不传 content 大字段。
+export type DashboardRange = '7d' | '30d' | 'all'
+
+/** messages 按天聚合计数（对话活跃度）。date 形如 'YYYY-MM-DD'。 */
+export interface ActivityPoint {
+  date: string
+  count: number
+}
+
+/** dashboard:activity 入参。fromSec/toSec 为 Unix 秒，闭区间。 */
+export interface ActivityQuery {
+  fromSec: number
+  toSec: number
+}

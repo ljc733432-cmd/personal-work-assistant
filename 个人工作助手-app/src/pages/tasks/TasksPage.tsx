@@ -59,12 +59,16 @@ export function TasksPage() {
   return (
     <div className="h-full overflow-y-auto">
       <div className="mx-auto max-w-3xl space-y-5 p-6">
-        <div>
-          <h1 className="text-2xl font-semibold">任务</h1>
-          <p className="mt-1 text-sm text-muted-foreground">
-            手动管理待办。将来 AI 可从对话抽取任务（M4），到点主动跟进（M6）。
-          </p>
-        </div>
+        {/* 品牌头部（v1.5：电光蓝径向光晕 + 标题入场）*/}
+        <header className="relative overflow-hidden">
+          <div className="hero-glow pointer-events-none absolute inset-0" aria-hidden />
+          <div className="relative animate-fade-up">
+            <h1 className="font-display text-2xl font-semibold tracking-tight">任务</h1>
+            <p className="mt-1 text-sm text-muted-foreground">
+              手动管理待办。将来 AI 可从对话抽取任务（M4），到点主动跟进（M6）。
+            </p>
+          </div>
+        </header>
 
         {/* 筛选条 */}
         <div className="flex flex-wrap gap-1.5">
@@ -82,22 +86,25 @@ export function TasksPage() {
           />
         )}
 
-        {filtered.map((t) => (
-          <TaskCard
-            key={t.id}
-            task={t}
-            editing={editingId === t.id}
-            onEdit={() => setEditingId(editingId === t.id ? null : t.id)}
-            onSave={(input) => {
-              upsert(input)
-              setEditingId(null)
-            }}
-            onToggleDone={() =>
-              upsert({ id: t.id, title: t.title, status: t.status === 'done' ? 'todo' : 'done' })
-            }
-            onDelete={() => remove(t.id)}
-          />
-        ))}
+        {/* 任务列表（v1.5：stagger 错峰入场）*/}
+        <div className="stagger-fade-up space-y-3">
+          {filtered.map((t) => (
+            <TaskCard
+              key={t.id}
+              task={t}
+              editing={editingId === t.id}
+              onEdit={() => setEditingId(editingId === t.id ? null : t.id)}
+              onSave={(input) => {
+                upsert(input)
+                setEditingId(null)
+              }}
+              onToggleDone={() =>
+                upsert({ id: t.id, title: t.title, status: t.status === 'done' ? 'todo' : 'done' })
+              }
+              onDelete={() => remove(t.id)}
+            />
+          ))}
+        </div>
 
         <AddTaskCard onAdd={(input) => upsert(input)} />
       </div>
@@ -231,7 +238,7 @@ function TaskCard({
   // 展示态
   const done = task.status === 'done'
   return (
-    <Card className={done ? 'opacity-60' : ''}>
+    <Card className={`transition-all duration-200 hover:-translate-y-0.5 hover:shadow-md ${done ? 'opacity-60' : ''}`}>
       <CardContent className="space-y-2 pt-4">
         <div className="flex items-start justify-between gap-3">
           <div className="flex items-start gap-2">

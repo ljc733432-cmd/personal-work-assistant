@@ -7,7 +7,7 @@ import { create } from 'zustand'
  * 场景用这个 store 协调：OverviewPage 调 setTab，App.tsx 订阅 tab 渲染对应页。
  * 避免引入 react-router（Electron 桌面应用单窗口，状态机切 tab 足够）。
  */
-export type Tab = 'overview' | 'chat' | 'tasks' | 'notes' | 'tools' | 'settings'
+export type Tab = 'overview' | 'dashboard' | 'chat' | 'tasks' | 'notes' | 'tools' | 'settings'
 
 interface NavState {
   tab: Tab

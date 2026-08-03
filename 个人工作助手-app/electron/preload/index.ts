@@ -56,6 +56,7 @@ const ALLOWED_INVOKE = [
   'conversation:delete',    // 删除会话（级联删消息）
   'message:list',           // 列某会话全部消息（历史 hydrate，M2）
   'message:insert',         // 写单条消息（chat:send 落库用，M2）
+  'dashboard:activity',     // 看板：按天聚合消息数（v1.4 M14）
 ] as const
 
 const ALLOWED_SEND = [

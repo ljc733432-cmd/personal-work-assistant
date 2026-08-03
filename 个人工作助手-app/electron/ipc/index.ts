@@ -1,7 +1,7 @@
 import { ipcMain, BrowserWindow } from 'electron'
 import { randomUUID } from 'node:crypto'
 import path from 'node:path'
-import { eq, desc } from 'drizzle-orm'
+import { eq, desc, and, gte, lte, sql } from 'drizzle-orm'
 import { getDb, dbHealthCheck } from '../services/db'
 import {
   providers,
@@ -76,6 +76,8 @@ import type {
   ConversationMessage,
   MessageInsertInput,
   MessageToolCall,
+  ActivityPoint,
+  ActivityQuery,
 } from '../types'
 
 /**
@@ -998,6 +1000,35 @@ function registerDbHandlers() {
   })
 }
 
+// ---------- Dashboard handlers（v1.4 M14 数据看板） ----------
+// 看板是只读聚合页。pomodoro/tasks/reminders/notes 复用现有 list（数据量小，前端 reduce）；
+// messages 表可能大，activity 单独走聚合 IPC，只回 date+count，不传 content 大字段。
+function registerDashboardHandlers() {
+  // 对话活跃度：按天聚合 messages 数量（含 user/assistant/tool 全 role）。
+  // created_at 是 Unix 秒，SQLite date(created_at,'unixepoch') 转 'YYYY-MM-DD'。
+  ipcMain.handle(
+    'dashboard:activity',
+    (_, query: ActivityQuery): IpcResult<ActivityPoint[]> => {
+      try {
+        const db = getDb()
+        const rows = db
+          .select({
+            date: sql<string>`date(${messages.createdAt}, 'unixepoch')`.as('date'),
+            count: sql<number>`count(*)`.as('count'),
+          })
+          .from(messages)
+          .where(and(gte(messages.createdAt, query.fromSec), lte(messages.createdAt, query.toSec)))
+          .groupBy(sql`date(${messages.createdAt}, 'unixepoch')`)
+          .orderBy(sql`date(${messages.createdAt}, 'unixepoch')`)
+          .all()
+        return ok(rows.map((r) => ({ date: r.date, count: r.count })))
+      } catch (e) {
+        return err(String(e))
+      }
+    },
+  )
+}
+
 // ---------- Conversation / Message CRUD（M2，照搬 task 模式） ----------
 function rowToConversation(row: typeof conversations.$inferSelect): Conversation {
   return {
@@ -1148,6 +1179,7 @@ export function registerIpcHandlers() {
   registerConverterHandlers()
   registerConversationHandlers()
   registerDbHandlers()
+  registerDashboardHandlers()
   registerMetaHandlers()
   logInfo('[ipc] handlers registered')
 }
