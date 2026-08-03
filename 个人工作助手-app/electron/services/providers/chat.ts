@@ -133,7 +133,7 @@ export async function chatWithProvider(opts: RunOptions): Promise<void> {
           parsed = {}
         }
         try {
-          const r = await tool.handler(parsed)
+          const r = await tool.handler(parsed, onConfirm)
           // 规范化：handler 可返回 string 或 ToolHandlerResult
           if (typeof r === 'string') {
             resultStr = r

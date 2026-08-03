@@ -16,17 +16,19 @@ export function WorkDirSection() {
   return (
     <div className="space-y-4">
       <div>
-        <h2 className="text-lg font-semibold">工作目录</h2>
+        <h2 className="text-lg font-semibold">常用目录（可选）</h2>
         <p className="mt-1 text-sm text-muted-foreground">
-          AI 能在这些目录里查找、读取文件（场景：「总结我某天的报告」）。每个目录可选「只读」或「读写」。
-          读写目录的写入会要求确认并自动备份原文件。
+          AI <strong>默认已能读取</strong>系统的「文档」「桌面」「下载」三个目录，不用在这里配置。
+          这里填的是<strong>额外常用目录</strong>（比如你的报告文件夹），省得每次对话都要说路径。
+          对话里临时指定的目录，AI 会首次询问后自动记住（本次会话有效）。
         </p>
       </div>
 
       {workDirs.length === 0 && (
-        <Card className="border-dashed">
-          <CardContent className="py-8 text-center text-sm text-muted-foreground">
-            还没有工作目录。添加一个，让 AI 能访问你的文件。
+        <Card className="border-dashed bg-muted/30">
+          <CardContent className="py-6 text-center text-sm text-muted-foreground">
+            没有额外常用目录。AI 默认能读「文档/桌面/下载」，对话里也能临时指定——
+            这里留空完全没问题。
           </CardContent>
         </Card>
       )}

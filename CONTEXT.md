@@ -100,14 +100,28 @@ FC 工具 `web_search(query)`。v1 接 **Tavily + Bing 两家**，设置里可�
 ### **回收站（File Trash）**
 `userData/fileTrash/{timestamp}/`，存被覆盖的原文件。
 
-### **文件工具（File Tools，M5 已实现）**
-AI 通过 FC 操作白名单文件的能力。4 个工具：
-- `list_files(dir)` — 列目录内容（名/大小/修改时间）
-- `read_file(path)` — 读文件内容（txt/md/json/csv/代码/pdf/docx，大文件截断）
-- `find_files(query, dateFrom, dateTo, ext, baseLabel)` — 按名/日期/扩展名搜索
-- `write_file(path, content)` — 仅「读写」目录可用，走三重防护
+### **文件工具（File Tools，M5.1 已实现）**
+AI 通过 FC 操作文件的能力。**三来源读取 + 写入三重防护**。
 
-**动态注册**：工具集按当前启用的 workDirs 动态组装（assembleTools）。无 workDirs → 不注册任何文件工具（模型不知道有这能力）；有只读目录 → 注册 list/read/find；有读写目录 → 额外注册 write。
+**三种读取来源（sources）**：
+1. **系统标准位置**（开箱即用，只读）：文档/桌面/下载，`app.getPath()` 获取
+2. **预填常用目录**（设置页「常用目录」区，可选）：用户填的额外目录，可只读/读写
+3. **会话已确认目录**（对话临时指定，只读）：用户对话里说的新目录，首次确认后本次会话有效，重启清空
+
+**工具**：
+- `list_accessible_dirs()` — 列当前可访问的目录（让模型知道范围，优先调它）
+- `list_files(dir)` / `read_file(path)` / `find_files(query,dateFrom,dateTo,ext,baseLabel)`
+- `write_file(path, content)` — 仅 readwrite 目录可用，走三重防护
+
+**首次确认机制**：读操作遇到 sources 外的新目录 → 返回 `{needsConfirm}` → FC 循环挂起弹窗 → 用户同意 → 加入 sessionApprovedDirs → 重试。系统位置/预填目录不弹（已信任）。
+
+**动态组装**：`assembleTools(ctx)` 按当前 sources 组装。sources 通过 getter 动态读取（sessionApproved 会变）。
+
+### **AccessibleDir（可访问目录）**
+统一目录描述：`{label, path, source('system'|'workdir'|'session'), mode('read'|'readwrite')}`。系统位置和会话目录恒只读，预填目录按用户设。
+
+### **会话授权目录（sessionApprovedDirs）**
+主进程内存里的 `AccessibleDir[]`，存本次运行期间用户对话里临时授权的目录。重启清空（避免误授权累积）。
 
 ### **工具确认（Tool Confirm，M5 已实现）**
 write_file 覆盖已存在文件时，FC 循环**挂起**：返回 `{kind:'confirm', prompt, action}` → 主进程推 `chat:confirm_request` → 渲染层弹窗 → 用户选 → `chat:confirm_response` 回传 → resolve 挂起的 Promise → 继续。这是「可挂起 FC 循环」机制（见 AGENTS.md §4）。

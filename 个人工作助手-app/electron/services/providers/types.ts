@@ -18,9 +18,11 @@ export type ToolHandlerResult =
   | { kind: 'result'; value: string }
   | { kind: 'confirm'; prompt: string; action: () => Promise<string> }
 
-/** 工具执行器：本地执行 FC。返回 result 或 confirm（需挂起等用户）。 */
+/** 工具执行器：本地执行 FC。返回 result 或 confirm（需挂起等用户）。
+ *  第二个参数 confirm：用于工具内部需要"子确认"的场景（如访问新目录），可选。 */
 export type ToolHandler = (
   args: Record<string, unknown>,
+  confirm?: (prompt: string) => Promise<boolean>,
 ) => Promise<ToolHandlerResult | string> | ToolHandlerResult | string
 
 export interface ToolRegistration {

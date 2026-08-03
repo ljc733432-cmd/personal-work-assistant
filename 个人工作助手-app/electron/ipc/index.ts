@@ -1,5 +1,6 @@
 import { ipcMain, BrowserWindow } from 'electron'
 import { randomUUID } from 'node:crypto'
+import path from 'node:path'
 import { eq } from 'drizzle-orm'
 import { getDb, dbHealthCheck } from '../services/db'
 import { providers, settings, workDirs } from '../services/db/schema'
@@ -11,7 +12,8 @@ import {
   listAllWorkDirs,
 } from '../services/providers/factory'
 import { chatWithProvider } from '../services/providers/chat'
-import { assembleTools } from '../services/tools'
+import { assembleTools, type ToolContext } from '../services/tools'
+import { getSystemDirs, type AccessibleDir } from '../services/systemDirs'
 import { PROVIDER_PRESETS } from '../services/providers/types'
 import { logInfo } from '../services/logger'
 import type { ChatSendParams, IpcResult, ProviderInput, Provider, WorkDir, WorkDirInput } from '../types'
@@ -168,6 +170,12 @@ function registerChatHandlers() {
   const abortMap = new Map<string, AbortController>()
   // reqId → confirm resolver（工具需要用户确认时挂起）
   const confirmMap = new Map<string, (approved: boolean) => void>()
+  // 本次会话（应用运行期间）已授权的目录，只读，重启清空
+  const sessionApprovedDirs: AccessibleDir[] = []
+
+  // 路径比较（大小写不敏感 + 规范化，兼容 Win）
+  const samePath = (a: string, b: string) =>
+    path.resolve(a).toLowerCase() === path.resolve(b).toLowerCase()
 
   ipcMain.on('chat:cancel', (_, reqId: string) => {
     abortMap.get(reqId)?.abort()
@@ -194,9 +202,45 @@ function registerChatHandlers() {
       const ac = new AbortController()
       abortMap.set(reqId, ac)
 
-      // 动态组装工具：始终含 get_current_time；按 workDirs 加文件工具
-      const enabledWorkDirs = listEnabledWorkDirs()
-      const tools = params.enableTools ? assembleTools(enabledWorkDirs) : undefined
+      // 构建 sources = 系统位置 + 启用的预填 workDirs + 会话已确认目录
+      const buildSources = (): AccessibleDir[] => {
+        const list: AccessibleDir[] = []
+        // 系统位置（文档/桌面/下载，只读）
+        for (const d of getSystemDirs()) {
+          if (!list.some((x) => samePath(x.path, d.path))) list.push(d)
+        }
+        // 预填 workDirs
+        for (const wd of listEnabledWorkDirs()) {
+          if (!list.some((x) => samePath(x.path, wd.path))) {
+            list.push({
+              label: wd.label,
+              path: wd.path,
+              source: 'workdir',
+              mode: wd.mode,
+            })
+          }
+        }
+        // 会话已确认（只读，会话级）
+        for (const sd of sessionApprovedDirs) {
+          if (!list.some((x) => samePath(x.path, sd.path))) {
+            list.push({ ...sd, source: 'session' })
+          }
+        }
+        return list
+      }
+
+      const ctx: ToolContext = {
+        get sources() {
+          return buildSources() // 动态读取（sessionApproved 会变）
+        },
+        onSessionApprove: (dir, label) => {
+          if (!sessionApprovedDirs.some((x) => samePath(x.path, dir))) {
+            sessionApprovedDirs.push({ label, path: dir, source: 'session', mode: 'read' })
+          }
+        },
+      }
+
+      const tools = params.enableTools ? assembleTools(ctx) : undefined
 
       const onToken = (text: string) => {
         win.webContents.send('chat:token', { reqId, text })
@@ -207,7 +251,7 @@ function registerChatHandlers() {
       const onFirstToken = (elapsedMs: number) => {
         win.webContents.send('chat:first_token', { reqId, elapsedMs })
       }
-      // 工具需要确认（如 write_file 覆盖）→ 推事件给前端，挂起等响应
+      // 工具需要确认（write_file 覆盖 / 目录首次访问）→ 推事件给前端，挂起等响应
       const onConfirm = (prompt: string) => {
         return new Promise<boolean>((resolve) => {
           confirmMap.set(reqId, resolve)

@@ -4,6 +4,7 @@ import fs from 'node:fs'
 import fsp from 'node:fs/promises'
 import path from 'node:path'
 import type { WorkDir } from '../types'
+import type { AccessibleDir } from './systemDirs'
 import { logInfo, logError } from './logger'
 
 const require = createRequire(import.meta.url)
@@ -28,64 +29,92 @@ const READ_TRUNCATE_CHARS = 20000 // 文本读取超过此字符截断
 export interface ResolvedPath {
   ok: boolean
   fullPath?: string
-  workDir?: WorkDir
+  belonging?: AccessibleDir
+  /** 需要用户首次确认访问的目录（绝对路径）。上层据此走 confirm 流程。 */
+  needsConfirm?: string
   error?: string
 }
 
 /**
- * 把「模型给的路径」解析为安全的绝对路径。
- * - 相对路径：相对某个白名单根解析（优先用第一个匹配的根，或显式指定 baseLabel）。
- * - 绝对路径：必须落在某个白名单内。
- * - 防御 ../ 逃逸：用 path.resolve + startsWith 双重判定。
+ * 把「模型给的路径」解析为安全的绝对路径（M5.1 多来源版）。
+ *
+ * sources = 系统位置 + 预填 workDirs + 会话已确认目录。
+ * - 绝对路径：若落在某 source 内 → ok；否则视为「新目录」→ needsConfirm。
+ * - 相对路径：按 baseLabel 或首个 source 解析；解析后仍需落在某 source 内。
+ * - 防御 ../ 逃逸：path.resolve + startsWith 双重判定。
+ *
+ * forWrite 时：只接受 mode=readwrite 的 source（系统位置/只读预填都拒绝写）。
  */
 export function resolveSafePath(
   inputPath: string,
-  workDirs: WorkDir[],
+  sources: AccessibleDir[],
   opts: { forWrite?: boolean; baseLabel?: string } = {},
 ): ResolvedPath {
   const { forWrite = false, baseLabel } = opts
 
-  // 筛选可用白名单：写操作只要 readwrite 的
-  const candidates = workDirs.filter((d) => (forWrite ? d.mode === 'readwrite' : true))
-  if (candidates.length === 0) {
-    return {
-      ok: false,
-      error: forWrite
-        ? '未配置任何「读写」工作目录，无法写入。请在设置页添加。'
-        : '未配置任何工作目录。',
-    }
-  }
+  // 写操作：只要 readwrite 的 source
+  const candidates = sources.filter((d) => (forWrite ? d.mode === 'readwrite' : true))
 
-  // 选基根：显式 baseLabel 优先，否则取第一个
-  const base = baseLabel
-    ? candidates.find((d) => d.label === baseLabel || d.path === baseLabel)
-    : candidates[0]
-  if (!base) {
-    return { ok: false, error: `找不到工作目录「${baseLabel}」` }
-  }
-
-  // path.isAbsolute 判断。Windows 也认 D:\ 风格。
   const isAbs = path.isAbsolute(inputPath)
-  const root = path.resolve(base.path)
-  const full = isAbs ? path.resolve(inputPath) : path.resolve(root, inputPath)
+  const full = isAbs
+    ? path.resolve(inputPath)
+    : path.resolve(baseRoot(sources, baseLabel), inputPath)
 
-  // 关键：规范化后必须在某白名单根之下（防 ../ 逃逸）
+  // 是否落在某 source 内
   const belonging = candidates.find((d) => {
     const rp = path.resolve(d.path)
     return full === rp || full.startsWith(rp + path.sep)
   })
 
-  if (!belonging) {
-    logError('[fileTools] 路径越界，拒绝：', full)
-    return { ok: false, error: `路径越界（不在任何工作目录内），已拒绝：${inputPath}` }
+  if (belonging) {
+    return { ok: true, fullPath: full, belonging }
   }
 
-  // 写权限二次校验（即便路径落在 read 根下）
-  if (forWrite && belonging.mode !== 'readwrite') {
-    return { ok: false, error: `目录「${belonging.label}」是只读的，不允许写入。` }
+  // 写操作：落在只读 source（如系统位置）→ 直接拒
+  if (forWrite) {
+    const inReadonly = sources.find((d) => {
+      const rp = path.resolve(d.path)
+      return (full === rp || full.startsWith(rp + path.sep)) && d.mode === 'read'
+    })
+    if (inReadonly) {
+      return { ok: false, error: `目录「${inReadonly.label}」是只读的，不允许写入。` }
+    }
+    // 写入到全新目录 → 需确认（且确认后也只本次会话有效）
+    return { ok: false, error: `写入路径不在任何可写目录内：${inputPath}` }
   }
 
-  return { ok: true, fullPath: full, workDir: belonging }
+  // 读操作：绝对路径但不在任何 source 内 → 需用户首次确认
+  if (isAbs) {
+    return { ok: false, needsConfirm: extractDirRoot(full) }
+  }
+
+  // 相对路径解析后越界 → 拒绝（相对路径不触发首次确认，避免歧义）
+  logError('[fileTools] 相对路径越界，拒绝：', full)
+  return { ok: false, error: `路径不在可访问范围内：${inputPath}（可用 list_accessible_dirs 查看）` }
+}
+
+/** 取 base 根路径：显式 baseLabel 优先，否则首个 source。 */
+function baseRoot(sources: AccessibleDir[], baseLabel?: string): string {
+  if (baseLabel) {
+    const f = sources.find((d) => d.label === baseLabel || d.path === baseLabel)
+    if (f) return path.resolve(f.path)
+  }
+  return sources.length > 0 ? path.resolve(sources[0].path) : process.cwd()
+}
+
+/** 从完整路径提取"目录根"用于首次确认。
+ *  策略：取到盘符下一级（如 D:\工作\报告 → D:\工作），避免一次确认整个盘。
+ *  若已是盘根（D:\）则原样返回。 */
+function extractDirRoot(full: string): string {
+  const resolved = path.resolve(full)
+  const parsed = path.parse(resolved)
+  // resolved = D:\工作\报告 → dir = D:\工作
+  // 若 dir 等于盘根（D:\），直接用 resolved
+  const parent = parsed.dir
+  if (parent.toLowerCase() === parsed.root.toLowerCase()) {
+    return resolved // 已经是盘根下一级
+  }
+  return parent
 }
 
 // ---------- 列目录 ----------
@@ -99,11 +128,13 @@ export interface DirEntry {
 
 export async function listFiles(
   inputDir: string,
-  workDirs: WorkDir[],
+  sources: AccessibleDir[],
   baseLabel?: string,
 ): Promise<string> {
-  const r = resolveSafePath(inputDir, workDirs, { baseLabel })
-  if (!r.ok || !r.fullPath) return JSON.stringify({ error: r.error })
+  const r = resolveSafePath(inputDir, sources, { baseLabel })
+  if (!r.ok || !r.fullPath) {
+    return JSON.stringify({ error: r.error, needsConfirm: r.needsConfirm })
+  }
 
   try {
     const entries = await fsp.readdir(r.fullPath, { withFileTypes: true })
@@ -126,7 +157,7 @@ export async function listFiles(
     }
     return JSON.stringify({
       dir: r.fullPath,
-      baseLabel: r.workDir?.label,
+      baseLabel: r.belonging?.label,
       count: out.length,
       truncated: entries.length > MAX_LIST_ENTRIES,
       entries: out,
@@ -141,11 +172,13 @@ export async function listFiles(
 /** 读文件内容，支持 txt/md/json 等文本 + pdf/docx。大文件截断。 */
 export async function readFileContent(
   inputPath: string,
-  workDirs: WorkDir[],
+  sources: AccessibleDir[],
   baseLabel?: string,
 ): Promise<string> {
-  const r = resolveSafePath(inputPath, workDirs, { baseLabel })
-  if (!r.ok || !r.fullPath) return JSON.stringify({ error: r.error })
+  const r = resolveSafePath(inputPath, sources, { baseLabel })
+  if (!r.ok || !r.fullPath) {
+    return JSON.stringify({ error: r.error, needsConfirm: r.needsConfirm })
+  }
 
   try {
     const stat = await fsp.stat(r.fullPath)
@@ -218,13 +251,13 @@ export interface FindResult {
   baseLabel: string
 }
 
-/** 递归扫描白名单，按 名/日期/扩展名 过滤。 */
-export async function findFiles(params: FindParams, workDirs: WorkDir[]): Promise<string> {
+/** 递归扫描可访问目录，按 名/日期/扩展名 过滤。跨系统位置/预填/会话确认的目录。 */
+export async function findFiles(params: FindParams, sources: AccessibleDir[]): Promise<string> {
   const roots = params.baseLabel
-    ? workDirs.filter((d) => d.label === params.baseLabel || d.path === params.baseLabel)
-    : workDirs
+    ? sources.filter((d) => d.label === params.baseLabel || d.path === params.baseLabel)
+    : sources
   if (roots.length === 0) {
-    return JSON.stringify({ error: '未配置工作目录，或指定的目录不存在' })
+    return JSON.stringify({ error: '没有可访问的目录（系统位置/工作目录均不可用）' })
   }
 
   const extNorm = params.ext ? (params.ext.startsWith('.') ? params.ext.toLowerCase() : '.' + params.ext.toLowerCase()) : null
@@ -262,6 +295,23 @@ export async function findFiles(params: FindParams, workDirs: WorkDir[]): Promis
     count: results.length,
     truncated: results.length >= MAX_FIND_RESULTS,
     results,
+  })
+}
+
+// ---------- 列出可访问目录（让模型知道范围） ----------
+
+/** 返回当前可访问的目录清单（label/path/source/mode），供模型决定去哪找。 */
+export function listAccessibleDirs(sources: AccessibleDir[]): string {
+  const dirs = sources.map((d) => ({
+    label: d.label,
+    path: d.path,
+    source: d.source, // system | workdir | session
+    mode: d.mode, // read | readwrite
+  }))
+  return JSON.stringify({
+    count: dirs.length,
+    hint: '这些是当前可读的目录。用户说「读某文件」时优先在这些目录找；find_files 默认搜全部。如需访问其他目录，告诉用户路径或让用户在对话里指定。',
+    dirs,
   })
 }
 
