@@ -167,6 +167,28 @@ export interface Conversation {
   updatedAt: number
 }
 
+// ---------- Reminder：提醒（M12.5 v1.2 工具扩展） ----------
+// 见 PRD §13.2 工具 2 + §13.4。与 Task 区别：提醒是「到点告诉一件事」，
+// 信号型，无完成度，不进任务列表。source: manual=工具页手建 / from_chat=AI 从对话抽。
+export type ReminderSource = 'manual' | 'from_chat'
+
+export interface Reminder {
+  id: string
+  time: number // Unix 秒，触发时间
+  content: string
+  done: boolean // 已触发/取消
+  source: ReminderSource
+  createdAt: number
+}
+
+/** reminder:upsert 入参。id 缺省=新建；source 由服务端按调用方控制。 */
+export interface ReminderInput {
+  id?: string
+  time: number
+  content: string
+  source?: ReminderSource // 工具页调用默认 manual；FC 工具传 from_chat
+}
+
 export interface ConversationInput {
   id?: string
   title?: string // 可空：首次创建可由首条消息回填

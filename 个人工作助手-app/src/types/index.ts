@@ -154,6 +154,26 @@ export interface TaskInput {
   dueDate?: number | null
 }
 
+// ---------- Reminder：提醒（M12.5 v1.2 工具扩展） ----------
+// 见 PRD §13.2 工具 2。与 Task 区别：信号型，无完成度，不进任务列表。
+export type ReminderSource = 'manual' | 'from_chat'
+
+export interface Reminder {
+  id: string
+  time: number // Unix 秒，触发时间
+  content: string
+  done: boolean
+  source: ReminderSource
+  createdAt: number
+}
+
+export interface ReminderInput {
+  id?: string
+  time: number
+  content: string
+  source?: ReminderSource
+}
+
 // ---------- TaskDraft：任务抽取草稿（M4） ----------
 // AI 从对话抽出的任务草稿，不直接入库，用户点"加入任务"才落库。
 export interface TaskDraft {

@@ -148,3 +148,23 @@ export type ConversationRow = typeof conversations.$inferSelect
 export type ConversationInsert = typeof conversations.$inferInsert
 export type MessageRow = typeof messages.$inferSelect
 export type MessageInsert = typeof messages.$inferInsert
+
+// ---------- Reminder：提醒（M12.5 v1.2 工具扩展） ----------
+// 见 PRD §13.2 工具 2 + §13.4 数据模型。
+// 与 Task 区别（PRD §13.2）：任务是「有截止日的工作」（有完成度），
+// 提醒是「到点告诉一件事」（信号，响一下就完），不进任务列表，避免污染。
+// time/done：调度器轮询 time<=now && done=0 的行触发通知，触发后置 done=1。
+// source：manual（工具页手建）/ from_chat（AI 从对话抽取，PRD §13.2 说提醒无副作用可静默建）。
+export const reminders = sqliteTable('reminders', {
+  id: text('id').primaryKey(),
+  time: integer('time', { mode: 'number' }).notNull(), // Unix 秒，触发时间
+  content: text('content').notNull(), // 提醒内容
+  done: integer('done', { mode: 'boolean' }).notNull().default(false), // 已触发/取消
+  source: text('source', { enum: ['manual', 'from_chat'] }).notNull().default('manual'),
+  createdAt: integer('created_at', { mode: 'number' })
+    .notNull()
+    .default(sql`(unixepoch())`),
+})
+
+export type ReminderRow = typeof reminders.$inferSelect
+export type ReminderInsert = typeof reminders.$inferInsert

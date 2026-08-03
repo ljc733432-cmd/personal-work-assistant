@@ -1,5 +1,6 @@
 import type { ToolRegistration } from './providers/types'
 import type { AccessibleDir } from './systemDirs'
+import { randomUUID } from 'node:crypto'
 import {
   listFiles,
   readFileContent,
@@ -13,7 +14,7 @@ import {
 import { webSearch, type ActiveSearchConfig } from './searchTools'
 import type { ToolHandlerResult } from './providers/types'
 import { getDb } from './db'
-import { tasks } from './db/schema'
+import { tasks, reminders } from './db/schema'
 import { eq } from 'drizzle-orm'
 import type { TaskStatus } from '../types'
 import fs from 'node:fs'
@@ -478,10 +479,73 @@ export function assembleTools(ctx: ToolContext): ToolRegistration[] {
     makeFindFilesTool(ctx),
     makeWriteFileTool(ctx),
     makeWebSearchTool(ctx),
+    // M12.5：提醒（A 轨 FC）。无副作用，直接入库，不走二次确认
+    // （PRD §13.2：提醒区别于任务，响一下就完，可随时删，不需确认）。
+    makeSetReminderTool(),
   ]
   // M6：跟进会话额外注册任务状态修改工具（走二次确认）
   if (ctx.conversationType === 'followup') {
     list.push(makeUpdateTaskStatusTool(), makeAppendFollowupLogTool())
   }
   return list
+}
+
+// ---------- set_reminder：设置提醒（M12.5 v1.2 A 轨） ----------
+// AI 从对话抽取提醒（"10 分钟后提醒我开会"）直接入库，无需人工确认。
+// time 接受 ISO 字符串或相对描述，模型负责换算成绝对 Unix 秒。
+function makeSetReminderTool(): ToolRegistration {
+  return {
+    def: {
+      type: 'function',
+      function: {
+        name: 'set_reminder',
+        description:
+          '设置一条提醒。当用户说"N 分钟/小时后提醒我..."或"明天 X 点提醒..."时调用。' +
+          '提醒到点会弹桌面通知。与任务的区别：提醒是到点告诉一件事（信号），' +
+          '不是有完成度的工作；无副作用，可直接设置不需确认。',
+        parameters: {
+          type: 'object',
+          properties: {
+            time: {
+              type: 'number',
+              description:
+                '触发时间，Unix 秒。可用 get_current_time 获取当前秒数后加上偏移量' +
+                '（如 10 分钟 = +600）。必须是把来的绝对时间。',
+            },
+            content: {
+              type: 'string',
+              description: '提醒内容，到点通知里会原样显示。简洁一句话。',
+            },
+          },
+          required: ['time', 'content'],
+        },
+      },
+    },
+    handler: (args) => {
+      const time = Number(args.time)
+      const content = String(args.content ?? '').trim()
+      if (!Number.isFinite(time) || time <= 0) {
+        return { kind: 'result', value: JSON.stringify({ error: 'time 非法，需为正数 Unix 秒' }) }
+      }
+      if (!content) {
+        return { kind: 'result', value: JSON.stringify({ error: 'content 不能为空' }) }
+      }
+      const id = randomUUID()
+      getDb()
+        .insert(reminders)
+        .values({ id, time, content, source: 'from_chat' })
+        .run()
+      const trigger = new Date(time * 1000).toLocaleString('zh-CN')
+      return {
+        kind: 'result',
+        value: JSON.stringify({
+          ok: true,
+          id,
+          content,
+          triggerAt: trigger,
+          message: `已设置提醒：${trigger} - ${content}`,
+        }),
+      }
+    },
+  }
 }

@@ -1,9 +1,9 @@
 import OpenAI from 'openai'
 import { eq, desc, and, or, ne, lte, asc, isNotNull } from 'drizzle-orm'
 import { getDb } from '../db'
-import { providers, workDirs, tasks } from '../db/schema'
+import { providers, workDirs, tasks, reminders } from '../db/schema'
 import { getSecret } from '../secret'
-import type { Provider, WorkDir, Task } from '../../types'
+import type { Provider, WorkDir, Task, Reminder } from '../../types'
 
 /**
  * Provider 加载 + OpenAI client 工厂。
@@ -163,4 +163,43 @@ export function listFollowupCandidates(): Task[] {
     .orderBy(asc(tasks.dueDate))
     .all()
     .map(rowToTask)
+}
+
+// ---------- Reminder 查询（M12.5 v1.2 工具扩展，只读放这里，写在 ipc） ----------
+
+/** drizzle Reminder 行 → 对外 Reminder 类型。 */
+function rowToReminder(r: typeof reminders.$inferSelect): Reminder {
+  return {
+    id: r.id,
+    time: r.time,
+    content: r.content,
+    done: r.done,
+    source: r.source,
+    createdAt: r.createdAt,
+  }
+}
+
+/** 列出全部提醒（工具页用）。未触发的按时间升序在前，已触发的排后。 */
+export function listReminders(): Reminder[] {
+  return getDb()
+    .select()
+    .from(reminders)
+    .orderBy(asc(reminders.done), asc(reminders.time))
+    .all()
+    .map(rowToReminder)
+}
+
+/**
+ * 列出已到期但未触发的提醒（M12.5 调度器轮询用）。
+ * 条件：done=0 AND time<=now。按时间升序（最早的先触发）。
+ */
+export function listDueReminders(): Reminder[] {
+  const now = Math.floor(Date.now() / 1000)
+  return getDb()
+    .select()
+    .from(reminders)
+    .where(and(eq(reminders.done, false), lte(reminders.time, now)))
+    .orderBy(asc(reminders.time))
+    .all()
+    .map(rowToReminder)
 }

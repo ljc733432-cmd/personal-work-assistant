@@ -7,6 +7,7 @@ import { useThemeStore, startSystemThemeWatcher } from '@/stores/theme'
 import { ChatPage } from '@/pages/chat/ChatPage'
 import { SettingsPage } from '@/pages/settings/SettingsPage'
 import { TasksPage } from '@/pages/tasks/TasksPage'
+import { ToolsPage } from '@/pages/tools/ToolsPage'
 
 // v1.2：导航从 3 项扩到 5 项（对话/任务/笔记/工具/设置）。
 // 笔记页与工具页（M12.5~M12.9）暂未实现，先占位渲染空状态，
@@ -82,7 +83,7 @@ function App() {
         ) : tab === 'notes' ? (
           <PlaceholderPage label="笔记" hint="M12.7~M12.8 实现" />
         ) : tab === 'tools' ? (
-          <PlaceholderPage label="工具" hint="M12.5~M12.9 实现" />
+          <ToolsPage />
         ) : (
           <SettingsPage />
         )}

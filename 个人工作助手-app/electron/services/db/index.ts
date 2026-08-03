@@ -102,6 +102,17 @@ CREATE TABLE IF NOT EXISTS messages (
   created_at        INTEGER NOT NULL DEFAULT (unixepoch())
 );
 CREATE INDEX IF NOT EXISTS idx_messages_conversation_id ON messages(conversation_id);
+
+-- M12.5：提醒（v1.2 工具扩展）
+CREATE TABLE IF NOT EXISTS reminders (
+  id          TEXT PRIMARY KEY,
+  time        INTEGER NOT NULL,           -- Unix 秒，触发时间
+  content     TEXT NOT NULL,
+  done        INTEGER NOT NULL DEFAULT 0, -- 0=未触发 1=已触发/取消
+  source      TEXT NOT NULL DEFAULT 'manual',
+  created_at  INTEGER NOT NULL DEFAULT (unixepoch())
+);
+CREATE INDEX IF NOT EXISTS idx_reminders_pending ON reminders(done, time);
 `
 
 export function getDb(): BetterSQLite3Database<typeof schema> {

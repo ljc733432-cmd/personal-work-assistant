@@ -34,6 +34,9 @@ const ALLOWED_INVOKE = [
   'task:delete',            // 删除任务
   'task:extract',           // 抽取任务草稿（M4，不直接入库）
   'task:create_from_draft', // 草稿确认入库（M4，source=from_chat）
+  'reminder:list',          // 列提醒（M12.5 v1.2）
+  'reminder:upsert',        // 新增/更新提醒
+  'reminder:delete',        // 删除提醒
   'conversation:list',      // 列会话（侧栏，M2）
   'conversation:create',    // 新建会话
   'conversation:rename',    // 重命名会话

@@ -1,8 +1,8 @@
 import { randomUUID } from 'node:crypto'
 import { eq, desc, and, gte } from 'drizzle-orm'
 import { getDb } from '../db'
-import { conversations, messages, settings } from '../db/schema'
-import { createClientForProvider, listFollowupCandidates } from '../providers/factory'
+import { conversations, messages, settings, reminders } from '../db/schema'
+import { createClientForProvider, listFollowupCandidates, listDueReminders } from '../providers/factory'
 import { FOLLOWUP_SYSTEM_PROMPT, buildCandidatesContext } from './prompts'
 import { logInfo } from '../logger'
 import type { ScheduledTask } from 'node-cron'
@@ -155,5 +155,55 @@ export function stopFollowupScheduler(): void {
   if (cronTask) {
     cronTask.stop()
     cronTask = null
+  }
+}
+
+// ---------- Reminder 轮询（M12.5 v1.2 提醒功能） ----------
+// 与 followup cron 并存的独立调度。followup 是定点（9:00/14:00）扫任务，
+// reminder 是每分钟轮询 reminders 表里 time<=now && done=0 的行。
+// 选 setInterval 而非 cron：提醒时间任意（精确到分），cron 表达式难以覆盖
+// 「用户随时设的 N 分钟后」，轮询 60s 精度足够且实现简单（ADR-012 node-cron
+// 是为定点语义选的；提醒是轮询语义，setInterval 更贴切）。
+
+let reminderTimer: ReturnType<typeof setInterval> | null = null
+
+/**
+ * 启动提醒轮询。每分钟扫到期提醒，逐个触发 onDue 回调（main 弹通知）后标记 done。
+ * @param onDue 到期回调（收到 Reminder 后弹通知等，由 main/index.ts 传入）
+ */
+export function startReminderPoller(
+  onDue: (reminder: { id: string; content: string; time: number }) => void,
+): void {
+  stopReminderPoller()
+  const POLL_INTERVAL_MS = 60 * 1000 // 每分钟扫一次
+
+  const tick = () => {
+    try {
+      const due = listDueReminders()
+      if (due.length === 0) return
+      const db = getDb()
+      for (const r of due) {
+        onDue({ id: r.id, content: r.content, time: r.time })
+        // 标记已触发，避免下轮重复
+        db.update(reminders).set({ done: true }).where(eq(reminders.id, r.id)).run()
+      }
+      logInfo(`[reminder] 触发 ${due.length} 条到期提醒`)
+    } catch (e) {
+      logInfo('[reminder] 轮询出错:', String(e))
+    }
+  }
+
+  // 启动后立即跑一次（处理应用关闭期间错过的提醒——但只弹当前到期的，
+  // 过去很久的也会触发；如不希望补触发可在此加 time > now - 3600 守卫）
+  tick()
+  reminderTimer = setInterval(tick, POLL_INTERVAL_MS)
+  logInfo('[reminder] 轮询已启动（每分钟）')
+}
+
+/** 停止提醒轮询（退出时调）。 */
+export function stopReminderPoller(): void {
+  if (reminderTimer) {
+    clearInterval(reminderTimer)
+    reminderTimer = null
   }
 }

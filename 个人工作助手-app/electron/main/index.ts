@@ -14,6 +14,8 @@ import {
   runFollowupTick,
   startFollowupScheduler,
   stopFollowupScheduler,
+  startReminderPoller,
+  stopReminderPoller,
 } from '../services/followup/scheduler'
 
 const require = createRequire(import.meta.url)
@@ -217,6 +219,18 @@ function showFollowupNotification(result: { conversationId: string; count: numbe
   n.show()
 }
 
+/** 弹提醒通知（M12.5 提醒轮询到点调）。点击显示主窗口。 */
+function showReminderNotification(reminder: { id: string; content: string }): void {
+  const n = new Notification({
+    title: '提醒',
+    body: reminder.content,
+  })
+  n.on('click', () => {
+    showWindow()
+  })
+  n.show()
+}
+
 /** 启动/重启调度器（按当前 settings 的 cron + paused）。 */
 async function restartScheduler(): Promise<void> {
   if (isFollowupPaused()) {
@@ -260,6 +274,8 @@ app.whenReady().then(async () => {
   createWindow()
   createTray()
   await restartScheduler()
+  // M12.5：启动提醒轮询（每分钟扫到期提醒，弹通知）
+  startReminderPoller((reminder) => showReminderNotification(reminder))
 })
 
 // M6：关窗不再退出（缩托盘），所以这里不做 app.quit()。
@@ -280,6 +296,7 @@ app.on('activate', () => {
 app.on('before-quit', () => {
   isQuitting = true
   stopFollowupScheduler()
+  stopReminderPoller()
 })
 
 // M6：所有窗口已关、app 即将退，关闭 DB 连接（之前一直没调，WAL 不落盘）

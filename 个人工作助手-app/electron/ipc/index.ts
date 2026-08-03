@@ -11,6 +11,7 @@ import {
   tasks,
   conversations,
   messages,
+  reminders,
 } from '../services/db/schema'
 import { setSecret, getSecret, deleteSecret } from '../services/secret'
 import {
@@ -20,6 +21,7 @@ import {
   listAllWorkDirs,
   listTasks,
   listFollowupCandidates,
+  listReminders,
 } from '../services/providers/factory'
 import {
   listConversations,
@@ -48,6 +50,8 @@ import type {
   TaskInput,
   TaskDraft,
   TaskDraftInput,
+  Reminder,
+  ReminderInput,
   Conversation,
   ConversationInput,
   ConversationMessage,
@@ -729,6 +733,68 @@ function registerTaskHandlers() {
   })
 }
 
+// ---------- Reminder handlers（M12.5 v1.2 提醒功能） ----------
+// 双轨制（PRD §13.1）：B 轨工具页手动 CRUD + A 轨 FC set_reminder 都走这套 IPC。
+// source 由调用方控制：工具页默认 manual；FC 工具传 from_chat。
+// 提醒无副作用（PRD §13.2），不像任务抽取需人工确认，可直接入库。
+function registerReminderHandlers() {
+  ipcMain.handle('reminder:list', (): IpcResult<Reminder[]> => {
+    try {
+      return ok(listReminders())
+    } catch (e) {
+      return err(String(e))
+    }
+  })
+
+  ipcMain.handle('reminder:upsert', (_, input: ReminderInput): IpcResult<Reminder> => {
+    try {
+      const db = getDb()
+      const id = input.id ?? randomUUID()
+      const existing = db.select().from(reminders).where(eq(reminders.id, id)).get()
+
+      if (existing) {
+        // 更新（不改 source，由服务端控制）
+        db.update(reminders)
+          .set({
+            time: input.time,
+            content: input.content,
+          })
+          .where(eq(reminders.id, id))
+          .run()
+      } else {
+        db.insert(reminders)
+          .values({
+            id,
+            time: input.time,
+            content: input.content,
+            source: input.source ?? 'manual',
+          })
+          .run()
+      }
+      const row = db.select().from(reminders).where(eq(reminders.id, id)).get()!
+      return ok({
+        id: row.id,
+        time: row.time,
+        content: row.content,
+        done: row.done,
+        source: row.source,
+        createdAt: row.createdAt,
+      })
+    } catch (e) {
+      return err(String(e))
+    }
+  })
+
+  ipcMain.handle('reminder:delete', (_, id: string): IpcResult<true> => {
+    try {
+      getDb().delete(reminders).where(eq(reminders.id, id)).run()
+      return ok(true)
+    } catch (e) {
+      return err(String(e))
+    }
+  })
+}
+
 function registerDbHandlers() {
   ipcMain.handle('db:health', (): IpcResult<{ ok: boolean; dbPath: string; detail: string }> => {
     return ok(dbHealthCheck())
@@ -879,6 +945,7 @@ export function registerIpcHandlers() {
   registerChatHandlers()
   registerWorkDirHandlers()
   registerTaskHandlers()
+  registerReminderHandlers()
   registerConversationHandlers()
   registerDbHandlers()
   registerMetaHandlers()
