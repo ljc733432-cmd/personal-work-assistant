@@ -13,7 +13,9 @@ import type { ChatMessage } from '../../types'
  *
  * 用 chat.completions（非 responses）——见 ADR-003，国产兼容端点只支持前者。
  */
-const MAX_TOOL_ROUNDS = 4
+// 工具调用轮次上限。设大值兼顾"复杂任务够用"与"防模型死循环烧 token"。
+// 如总结整个项目文件夹需要多次 read_file，4 轮远不够，提到 25。
+const MAX_TOOL_ROUNDS = 25
 
 interface RunOptions extends ChatRequest {
   client: OpenAI
@@ -165,6 +167,6 @@ export async function chatWithProvider(opts: RunOptions): Promise<void> {
     // 循环回到顶部，再发一次请求让模型基于工具结果生成最终答
   }
 
-  // 达到上限仍没结束：补一句收尾
-  onToken('\n[已达到工具调用轮次上限]')
+  // 达到上限仍没结束：补一句收尾，引导模型基于已有结果给答复
+  onToken('\n\n_（已达到本轮工具调用上限，请基于已获取的信息继续回答）_')
 }
