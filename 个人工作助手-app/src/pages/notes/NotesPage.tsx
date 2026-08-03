@@ -121,7 +121,7 @@ export function NotesPage() {
               {query ? '未找到匹配笔记' : '暂无笔记。也可在对话里说「把这段存成笔记」让 AI 创建。'}
             </div>
           ) : (
-            <div className="space-y-0.5">
+            <div className="stagger-fade-up space-y-0.5">
               {displayList.map((n) => (
                 <button
                   key={n.id}

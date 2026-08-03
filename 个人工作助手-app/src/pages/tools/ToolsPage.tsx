@@ -28,10 +28,16 @@ export function ToolsPage() {
   return (
     <div className="h-full overflow-y-auto">
       <div className="mx-auto max-w-3xl px-6 py-8">
-        <h1 className="mb-1 text-xl font-semibold">工具</h1>
-        <p className="mb-6 text-sm text-muted-foreground">高频轻量工具集合</p>
+        {/* 品牌头部（v1.5：电光蓝径向光晕 + 标题入场）*/}
+        <header className="relative mb-6 overflow-hidden">
+          <div className="hero-glow pointer-events-none absolute inset-0" aria-hidden />
+          <div className="relative animate-fade-up">
+            <h1 className="font-display text-xl font-semibold tracking-tight">工具</h1>
+            <p className="mt-1 text-sm text-muted-foreground">高频轻量工具集合</p>
+          </div>
+        </header>
 
-        <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
+        <div className="stagger-fade-up grid grid-cols-1 gap-3 sm:grid-cols-3">
           <ToolCard
             icon={Bell}
             title="提醒"

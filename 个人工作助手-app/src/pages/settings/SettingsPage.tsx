@@ -46,12 +46,16 @@ export function SettingsPage() {
   return (
     <div className="h-full overflow-y-auto">
       <div className="mx-auto max-w-3xl space-y-6 p-6">
-        <div>
-          <h1 className="text-2xl font-semibold">设置</h1>
-          <p className="mt-1 text-sm text-muted-foreground">
-            配置模型 Provider。API Key 经操作系统级 safeStorage 加密保存，不明文落库。
-          </p>
-        </div>
+        {/* 品牌头部（v1.5：电光蓝径向光晕 + 标题入场）*/}
+        <header className="relative overflow-hidden">
+          <div className="hero-glow pointer-events-none absolute inset-0" aria-hidden />
+          <div className="relative animate-fade-up">
+            <h1 className="font-display text-2xl font-semibold tracking-tight">设置</h1>
+            <p className="mt-1 text-sm text-muted-foreground">
+              配置模型 Provider。API Key 经操作系统级 safeStorage 加密保存，不明文落库。
+            </p>
+          </div>
+        </header>
 
       {providers.length === 0 && (
         <Card className="border-dashed">
