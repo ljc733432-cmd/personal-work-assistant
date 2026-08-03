@@ -68,6 +68,27 @@ export interface WorkDirInput {
   enabled: boolean
 }
 
+// ---------- SearchProvider：联网搜索配置（M5 搜索半） ----------
+export type SearchProviderType = 'tavily'
+
+export interface SearchProvider {
+  id: string
+  name: string
+  type: SearchProviderType
+  apiKeyRef: string
+  enabled: boolean
+  createdAt: number
+  updatedAt: number
+}
+
+export interface SearchProviderInput {
+  id?: string
+  name: string
+  type: SearchProviderType
+  apiKey?: string
+  enabled: boolean
+}
+
 // ---------- 工具确认请求（write_file 覆盖等） ----------
 export interface ConfirmRequest {
   reqId: string

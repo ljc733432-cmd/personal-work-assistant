@@ -3,20 +3,31 @@ import { randomUUID } from 'node:crypto'
 import path from 'node:path'
 import { eq } from 'drizzle-orm'
 import { getDb, dbHealthCheck } from '../services/db'
-import { providers, settings, workDirs } from '../services/db/schema'
-import { setSecret, deleteSecret } from '../services/secret'
+import { providers, settings, workDirs, searchProviders } from '../services/db/schema'
+import { setSecret, getSecret, deleteSecret } from '../services/secret'
 import {
   listProviders,
   createClientForProvider,
   listEnabledWorkDirs,
   listAllWorkDirs,
 } from '../services/providers/factory'
+import { listSearchProviders, getActiveSearchConfig } from '../services/search/factory'
+import { pingTavily } from '../services/searchTools'
 import { chatWithProvider } from '../services/providers/chat'
 import { assembleTools, type ToolContext } from '../services/tools'
 import { getSystemDirs, type AccessibleDir } from '../services/systemDirs'
 import { PROVIDER_PRESETS } from '../services/providers/types'
 import { logInfo } from '../services/logger'
-import type { ChatSendParams, IpcResult, ProviderInput, Provider, WorkDir, WorkDirInput } from '../types'
+import type {
+  ChatSendParams,
+  IpcResult,
+  ProviderInput,
+  Provider,
+  WorkDir,
+  WorkDirInput,
+  SearchProviderInput,
+  SearchProvider,
+} from '../types'
 
 /**
  * IPC handler 注册中心。
@@ -165,6 +176,88 @@ function registerSettingsHandlers() {
   })
 }
 
+// ---------- SearchProvider CRUD（联网搜索配置，照搬 provider 模式） ----------
+function rowToSearchProvider(row: typeof searchProviders.$inferSelect): SearchProvider {
+  return {
+    id: row.id,
+    name: row.name,
+    type: row.type,
+    apiKeyRef: row.apiKeyRef,
+    enabled: row.enabled,
+    createdAt: row.createdAt,
+    updatedAt: row.updatedAt,
+  }
+}
+
+function registerSearchProviderHandlers() {
+  ipcMain.handle('search-provider:list', (): IpcResult<SearchProvider[]> => {
+    try {
+      return ok(listSearchProviders())
+    } catch (e) {
+      return err(String(e))
+    }
+  })
+
+  // 新增/更新（含明文 Key 落 safeStorage）
+  ipcMain.handle('search-provider:upsert', (_, input: SearchProviderInput): IpcResult<SearchProvider> => {
+    try {
+      const db = getDb()
+      const id = input.id ?? randomUUID()
+      // ref 前缀 searchprovider_，与模型 Provider 的 provider_ 区分，互不冲突
+      const apiKeyRef = `searchprovider_${id}`
+
+      if (input.apiKey) setSecret(apiKeyRef, input.apiKey)
+
+      const now = Math.floor(Date.now() / 1000)
+      const existing = db.select().from(searchProviders).where(eq(searchProviders.id, id)).get()
+
+      if (existing) {
+        db.update(searchProviders)
+          .set({ name: input.name, type: input.type, enabled: input.enabled, updatedAt: now })
+          .where(eq(searchProviders.id, id))
+          .run()
+      } else {
+        db.insert(searchProviders)
+          .values({ id, name: input.name, type: input.type, apiKeyRef, enabled: input.enabled })
+          .run()
+      }
+      const row = db.select().from(searchProviders).where(eq(searchProviders.id, id)).get()!
+      return ok(rowToSearchProvider(row))
+    } catch (e) {
+      return err(String(e))
+    }
+  })
+
+  ipcMain.handle('search-provider:delete', (_, id: string): IpcResult<true> => {
+    try {
+      const db = getDb()
+      const row = db.select().from(searchProviders).where(eq(searchProviders.id, id)).get()
+      if (row) deleteSecret(row.apiKeyRef)
+      db.delete(searchProviders).where(eq(searchProviders.id, id)).run()
+      return ok(true)
+    } catch (e) {
+      return err(String(e))
+    }
+  })
+
+  // 测试连接：发一个最小 query ping，验证 Key 可用 + 网络可达
+  ipcMain.handle('search-provider:test', async (_, id: string): Promise<IpcResult<string>> => {
+    try {
+      const row = getDb().select().from(searchProviders).where(eq(searchProviders.id, id)).get()
+      if (!row) return err('Provider 不存在')
+      const apiKey = getSecret(row.apiKeyRef)
+      if (!apiKey) return err('未配置 API Key（或 Key 已损坏）')
+
+      const t0 = Date.now()
+      const count = await pingTavily(apiKey)
+      const ms = Date.now() - t0
+      return ok(`连接成功（${ms}ms，返回 ${count} 条测试结果）`)
+    } catch (e) {
+      return err(String(e))
+    }
+  })
+}
+
 function registerChatHandlers() {
   // reqId → AbortController（取消）
   const abortMap = new Map<string, AbortController>()
@@ -251,6 +344,8 @@ function registerChatHandlers() {
             sessionWritableDirs.push(dir)
           }
         },
+        // 联网搜索配置：动态读取（设置页改了立即生效，无配置返回 null 走降级）
+        getActiveSearchConfig: () => getActiveSearchConfig(),
       }
 
       const tools = params.enableTools ? assembleTools(ctx) : undefined
@@ -376,6 +471,7 @@ function registerMetaHandlers() {
 export function registerIpcHandlers() {
   registerProviderHandlers()
   registerSettingsHandlers()
+  registerSearchProviderHandlers()
   registerChatHandlers()
   registerWorkDirHandlers()
   registerDbHandlers()

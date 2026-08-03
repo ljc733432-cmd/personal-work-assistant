@@ -75,3 +75,25 @@ export interface WorkDirInput {
   mode: WorkDirMode
   enabled: boolean
 }
+
+// ---------- SearchProvider：联网搜索配置（M5 搜索半） ----------
+// 本轮 type 只 'tavily'（ADR-002 终态双家的第一半）。
+export type SearchProviderType = 'tavily'
+
+export interface SearchProvider {
+  id: string
+  name: string
+  type: SearchProviderType
+  apiKeyRef: string // 指向 safeStorage 的引用 key，不存明文
+  enabled: boolean
+  createdAt: number
+  updatedAt: number
+}
+
+export interface SearchProviderInput {
+  id?: string
+  name: string
+  type: SearchProviderType
+  apiKey?: string // 明文，仅 upsert 时传入，落库前走 safeStorage 加密
+  enabled: boolean
+}

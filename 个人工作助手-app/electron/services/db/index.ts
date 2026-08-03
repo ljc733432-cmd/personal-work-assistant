@@ -55,6 +55,16 @@ CREATE TABLE IF NOT EXISTS work_dirs (
   created_at  INTEGER NOT NULL DEFAULT (unixepoch()),
   updated_at  INTEGER NOT NULL DEFAULT (unixepoch())
 );
+
+CREATE TABLE IF NOT EXISTS search_providers (
+  id           TEXT PRIMARY KEY,
+  name         TEXT NOT NULL,
+  type         TEXT NOT NULL,
+  api_key_ref  TEXT NOT NULL,
+  enabled      INTEGER NOT NULL DEFAULT 1,
+  created_at   INTEGER NOT NULL DEFAULT (unixepoch()),
+  updated_at   INTEGER NOT NULL DEFAULT (unixepoch())
+);
 `
 
 export function getDb(): BetterSQLite3Database<typeof schema> {

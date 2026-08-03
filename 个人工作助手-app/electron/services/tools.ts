@@ -10,6 +10,7 @@ import {
   MAX_WRITE_BYTES,
   type FindParams,
 } from './fileTools'
+import { webSearch, type ActiveSearchConfig } from './searchTools'
 import type { ToolHandlerResult } from './providers/types'
 import fs from 'node:fs'
 import fsp from 'node:fs/promises'
@@ -36,6 +37,12 @@ export interface ToolContext {
   onSessionApprove: (dir: string, label: string) => void
   /** 用户授权写入某系统/只读目录后，把该目录标记为会话级可写（本次会话有效）。 */
   onSessionWritable: (dir: string) => void
+  /**
+   * 当前活跃的联网搜索配置（动态读取，设置页改了立即生效）。
+   * 返回 null = 未配置/未启用 → web_search 走降级提示。
+   * 与 sources 同模式：getter 在 IPC 层注入，每次调用现读。
+   */
+  getActiveSearchConfig?: () => ActiveSearchConfig | null
 }
 
 // ---------- 当前时间 ----------
@@ -316,6 +323,45 @@ async function withDirConfirm(
   }
 }
 
+// ---------- web_search（联网搜索，M5 搜索半） ----------
+function makeWebSearchTool(ctx: ToolContext): ToolRegistration {
+  return {
+    def: {
+      type: 'function',
+      function: {
+        name: 'web_search',
+        description:
+          '联网搜索获取实时信息或最新数据。当用户问「最新的 XX」「最近的政策」「现在」等需要联网才能确认的事实时调用。结果含每条的 url，请在回答里标注来源链接。断网或未配置时会返回降级提示。',
+        parameters: {
+          type: 'object',
+          properties: {
+            query: { type: 'string', description: '搜索关键词' },
+            timeRange: {
+              type: 'string',
+              enum: ['day', 'week', 'month', 'year'],
+              description: '可选：结果时间范围（day=一天内，week=一周内，以此类推）',
+            },
+            topic: {
+              type: 'string',
+              enum: ['general', 'news', 'finance'],
+              description: '可选：搜索类别，默认 general。新闻类用 news',
+            },
+          },
+          required: ['query'],
+        },
+      },
+    },
+    handler: async (args) => {
+      const params = {
+        query: String(args.query ?? ''),
+        ...(args.timeRange ? { timeRange: args.timeRange as 'day' | 'week' | 'month' | 'year' } : {}),
+        ...(args.topic ? { topic: args.topic as 'general' | 'news' | 'finance' } : {}),
+      }
+      return await webSearch(params, ctx.getActiveSearchConfig)
+    },
+  }
+}
+
 // ---------- 工具组装入口 ----------
 export function assembleTools(ctx: ToolContext): ToolRegistration[] {
   // 始终注册文件工具（全盘模式 sources 为空，工具内部处理）
@@ -326,5 +372,6 @@ export function assembleTools(ctx: ToolContext): ToolRegistration[] {
     makeReadFileTool(ctx),
     makeFindFilesTool(ctx),
     makeWriteFileTool(ctx),
+    makeWebSearchTool(ctx),
   ]
 }

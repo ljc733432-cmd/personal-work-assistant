@@ -4,7 +4,7 @@ import { integer, sqliteTable, text } from 'drizzle-orm/sqlite-core'
 /**
  * Drizzle schema（SQLite）。
  * M1：providers + settings
- * M5：work_dirs（工作目录白名单）
+ * M5：work_dirs（工作目录白名单）+ search_providers（联网搜索配置）
  * M2~M6 会追加 conversations / messages / tasks 等（见 PRD §4.2）。
  */
 
@@ -56,3 +56,24 @@ export type ProviderRow = typeof providers.$inferSelect
 export type ProviderInsert = typeof providers.$inferInsert
 export type WorkDirRow = typeof workDirs.$inferSelect
 export type WorkDirInsert = typeof workDirs.$inferInsert
+
+// ---------- SearchProvider：联网搜索配置（M5 搜索半） ----------
+// type 当前只 'tavily'（ADR-002 终态双家的第一半，bing 留 enum 扩展位）。
+// apiKeyRef 同模型 Provider：指向 safeStorage，绝不存明文 Key。
+export const searchProviders = sqliteTable('search_providers', {
+  id: text('id').primaryKey(),
+  name: text('name').notNull(),
+  type: text('type', { enum: ['tavily'] }).notNull(),
+  // 指向 safeStorage 的引用 key，绝不存明文 Key（与 providers 同模式）
+  apiKeyRef: text('api_key_ref').notNull(),
+  enabled: integer('enabled', { mode: 'boolean' }).notNull().default(true),
+  createdAt: integer('created_at', { mode: 'number' })
+    .notNull()
+    .default(sql`(unixepoch())`),
+  updatedAt: integer('updated_at', { mode: 'number' })
+    .notNull()
+    .default(sql`(unixepoch())`),
+})
+
+export type SearchProviderRow = typeof searchProviders.$inferSelect
+export type SearchProviderInsert = typeof searchProviders.$inferInsert

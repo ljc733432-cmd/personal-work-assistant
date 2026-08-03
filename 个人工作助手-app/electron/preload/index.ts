@@ -25,6 +25,10 @@ const ALLOWED_INVOKE = [
   'workdir:upsert',         // 新增/更新工作目录
   'workdir:delete',         // 删除工作目录
   'workdir:pick',           // 弹目录选择对话框（M5）
+  'search-provider:list',   // 列联网搜索 Provider（M5 搜索半）
+  'search-provider:upsert', // 新增/更新搜索 Provider
+  'search-provider:delete', // 删除搜索 Provider
+  'search-provider:test',   // 测试搜索连接（发最小 query）
 ] as const
 
 const ALLOWED_SEND = [

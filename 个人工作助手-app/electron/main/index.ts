@@ -5,9 +5,21 @@ import path from 'node:path'
 import os from 'node:os'
 
 import { registerIpcHandlers } from '../ipc'
+import { logError } from '../services/logger'
 
 const require = createRequire(import.meta.url)
 const __dirname = path.dirname(fileURLToPath(import.meta.url))
+
+// 全局错误兜底：未捕获的异常 / 未处理的 Promise rejection。
+// 默认情况下 Electron 会弹原生报错窗口（用户看到的就是这个）。
+// 这里改为写日志 + 控制台，避免弹窗打断用户；真正要排障看 userData/app.log。
+// （根因治理仍应在具体调用点 try/catch；这里是最后防线。）
+process.on('uncaughtException', (err) => {
+  logError('[main] uncaughtException:', err?.stack ?? String(err))
+})
+process.on('unhandledRejection', (reason) => {
+  logError('[main] unhandledRejection:', reason instanceof Error ? reason.stack : String(reason))
+})
 
 // 构建产物结构：
 // ├─┬ dist-electron
