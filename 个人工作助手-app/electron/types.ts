@@ -301,3 +301,11 @@ export interface ActivityQuery {
   fromSec: number
   toSec: number
 }
+
+// ---------- ModelTier：模型档位（v1.6 M15） ----------
+// 存 settings KV `router.tiers` 的 JSON 字符串（零迁移），不建表。
+export interface ModelTier {
+  id: string
+  name: string
+  providerId: string
+}

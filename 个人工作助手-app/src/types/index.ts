@@ -282,3 +282,12 @@ export interface ActivityQuery {
   fromSec: number
   toSec: number
 }
+
+// ---------- ModelTier：模型档位（v1.6 M15） ----------
+// 见 CONTEXT.md「ModelTier」。语义化档位层：给 provider 加一层用户自定义快捷分组。
+// 存 settings KV `router.tiers` 的 JSON（零迁移），不建表。
+export interface ModelTier {
+  id: string
+  name: string // 档位名（如「快型」「强力」）
+  providerId: string // 绑定的 Provider id
+}

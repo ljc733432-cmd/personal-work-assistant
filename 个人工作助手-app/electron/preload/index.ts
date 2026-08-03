@@ -53,6 +53,7 @@ const ALLOWED_INVOKE = [
   'conversation:list',      // 列会话（侧栏，M2）
   'conversation:create',    // 新建会话
   'conversation:rename',    // 重命名会话
+  'conversation:setProvider', // 设置会话默认 provider（M15 档位记忆）
   'conversation:delete',    // 删除会话（级联删消息）
   'message:list',           // 列某会话全部消息（历史 hydrate，M2）
   'message:insert',         // 写单条消息（chat:send 落库用，M2）

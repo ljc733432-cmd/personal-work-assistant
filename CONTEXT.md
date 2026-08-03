@@ -16,10 +16,20 @@
 ### **Provider 抽象层（Provider Adapter / 适配器）**
 主进程里 `electron/services/providers/` 下，每家模型一份适配器，对外暴露统一的 `chat(messages, tools, onToken)` 流式方法。底层都走 OpenAI SDK，靠 `baseURL`+`apiKey` 切换。
 
+### **ModelTier（模型档位，v1.6）**
+Provider 之上的语义化快捷分组（ADR-022）。`{id, name, providerId}`——给冰冷的 Provider 列表加一层用户自定义别名。
+- 例：「快型」→glm-flash、「强力」→glm-4.5。对话页 select 显示档位名（直觉）而非具体 Provider（冰冷）。
+- **手动分层，非自动判定**：用户手动切换，要省钱切快型、要质量切强力。不做「自动判断该用哪个」（PRD §16.3 说难调，明确推迟）。
+- **存储**：settings KV `router.tiers` 的 JSON（零迁移，不建表）。
+- **会话级记忆**：复用 `conversation.defaultProviderId`（闲置字段，记录每会话上次选的 providerId）。
+- **路由解析层**：`resolveProviderId(requested, ctx?)` 当前透传，ctx 参数为未来自动路由预留。
+- **不要叫**："路由/自动切换"——档位特指手动语义分组；"分类器"——本项目不做自动判定。
+
 ### **Conversation（会话）**
 一段连续对话。`{id, title, type, scenarioId?, defaultProviderId?, pinned, createdAt, updatedAt}`。
 - `type=normal` 普通会话；`type=followup` **跟进会话**（见下）。
 - `title` 自动用首条消息生成，可改。
+- `defaultProviderId` v1.6 起用于**会话级模型记忆**（上次选的 provider/档位），M2 定义后闲置至今被复用。
 
 ### **Message（消息）**
 会话里的一条消息。`{role, content, providerId?, toolCalls?, attachments?}`。
@@ -288,3 +298,4 @@ PRD §7 验收优先级。P0 必做 = v1 完成；P1 可选。
 | 首页 / 主页 / dashboard | **概览页（Overview Page）**（v1.3 新增首页，聚合数据） |
 | 空状态 / 占位 | **EmptyState**（统一组件，Phosphor duotone 大图标） |
 | 首页 / 统计页 / 报表 | **Dashboard**（v1.4 数据看板，历史趋势分析，区别于概览页今日快照） |
+| 路由 / 自动切换 / 分类器 | **ModelTier**（v1.6 模型档位，手动语义分组，不做自动判定） |

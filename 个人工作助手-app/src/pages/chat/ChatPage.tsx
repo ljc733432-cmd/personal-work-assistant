@@ -7,6 +7,7 @@ import { ConfirmDialog } from '@/components/ui/dialog'
 import { useProvidersStore } from '@/stores/providers'
 import { useChatStore } from '@/stores/chat'
 import { useTasksStore } from '@/stores/tasks'
+import { useTiersStore } from '@/stores/tiers'
 import { ConversationList } from './ConversationList'
 import { DraftCard } from './DraftCard'
 import { invoke, on, send } from '@/lib/ipc'
@@ -45,6 +46,12 @@ export function ChatPage() {
   // active 会话的流式元状态（per-conversation，Step6：切到 B 时 B 不被 A 的流式锁住）
   const meta = useChatStore((s) => (s.activeId ? s.metaByConv[s.activeId] : undefined))
   const streaming = meta?.streaming ?? false
+
+  // M15：当前会话对象（读 defaultProviderId 做会话级记忆）+ 档位列表
+  const currentConv = useChatStore((s) =>
+    s.activeId ? s.conversations.find((c) => c.id === s.activeId) : undefined,
+  )
+  const { tiers, refresh: refreshTiers } = useTiersStore()
   const firstTokenMs = meta?.firstTokenMs ?? null
   const error = meta?.error ?? null
   const truncatedNotice = meta?.truncatedNotice ?? null
@@ -107,13 +114,25 @@ export function ChatPage() {
     }
   }
 
-  // 默认选中第一个启用的 provider
+  // M15：providerId 初始化优先级：会话 defaultProviderId（会话级记忆）> 第一个启用 provider
   useEffect(() => {
-    if (!providerId && providers.length) {
+    refreshTiers()
+  }, [refreshTiers])
+
+  // 仅在切会话（activeId 变化）时 hydrate providerId，不依赖 providerId 自身
+  // （否则用户切 provider 会触发此 effect 把 providerId 覆盖回会话旧值）
+  useEffect(() => {
+    if (currentConv?.defaultProviderId) {
+      setProviderId(currentConv.defaultProviderId)
+      return
+    }
+    // 无会话记忆时，默认第一个启用 provider
+    if (providers.length) {
       const first = providers.find((p) => p.enabled) ?? providers[0]
       if (first) setProviderId(first.id)
     }
-  }, [providers, providerId])
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [activeId])
 
   // 滚到底
   useEffect(() => {
@@ -135,6 +154,25 @@ export function ChatPage() {
       activeCleanup.current = null
     }
   }, [])
+
+  // M15：切换 provider 时同步持久化到会话（会话级记忆，复用闲置字段 defaultProviderId）
+  // 关键：DB 和 chat store 的 conversations 都要更新，否则下次切回该会话 hydrate 到旧值
+  const handleProviderChange = async (nextProviderId: string) => {
+    setProviderId(nextProviderId)
+    if (activeId) {
+      // 同步更新 store 的 conversations（让 currentConv.defaultProviderId 立即准确）
+      useChatStore.setState((s) => ({
+        conversations: s.conversations.map((c) =>
+          c.id === activeId ? { ...c, defaultProviderId: nextProviderId } : c,
+        ),
+      }))
+      try {
+        await invoke<true>('conversation:setProvider', activeId, nextProviderId)
+      } catch {
+        // 持久化失败不影响本次切换（内存 state 已更新）
+      }
+    }
+  }
 
   const handleSend = async () => {
     if (!input.trim() || !providerId || streaming) return
@@ -312,14 +350,31 @@ export function ChatPage() {
         <select
           className="h-8 rounded-md border border-input bg-background px-2 text-sm"
           value={providerId}
-          onChange={(e) => setProviderId(e.target.value)}
+          onChange={(e) => handleProviderChange(e.target.value)}
         >
           {enabledProviders.length === 0 && <option value="">未配置模型</option>}
-          {enabledProviders.map((p) => (
-            <option key={p.id} value={p.id}>
-              {p.name} · {p.model}
-            </option>
-          ))}
+          {/* M15：档位快捷入口（绑定的 providerId 作 value，选了等于直接选那个 provider）*/}
+          {tiers.length > 0 && enabledProviders.length > 0 && (
+            <optgroup label="⚡ 档位">
+              {tiers.map((t) => {
+                const p = providers.find((x) => x.id === t.providerId)
+                if (!p) return null
+                return (
+                  <option key={t.id} value={t.providerId}>
+                    {t.name} · {p.model}
+                  </option>
+                )
+              })}
+            </optgroup>
+          )}
+          {/* 具体模型（始终可用，档位只是快捷别名）*/}
+          <optgroup label="具体模型">
+            {enabledProviders.map((p) => (
+              <option key={p.id} value={p.id}>
+                {p.name} · {p.model}
+              </option>
+            ))}
+          </optgroup>
         </select>
         <label className="flex items-center gap-1.5 text-xs text-muted-foreground">
           <input

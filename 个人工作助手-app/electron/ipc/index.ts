@@ -43,6 +43,7 @@ import { getNotesDir, setNotesDir } from '../services/notes/config'
 import { convertDocument, supportedTargets } from '../services/converter'
 import { chatWithProvider, type ChatResult } from '../services/providers/chat'
 import { truncateByTokenBudget } from '../services/providers/truncate'
+import { resolveProviderId } from '../services/providers/router'
 import { extractTasks } from '../services/taskExtractor'
 import { assembleTools, type ToolContext } from '../services/tools'
 import { getSystemDirs, type AccessibleDir } from '../services/systemDirs'
@@ -415,7 +416,9 @@ function registerChatHandlers() {
     if (!win) return err('无可用窗口')
 
     try {
-      const { client, model } = createClientForProvider(params.providerId)
+      // M15：路由解析（当前透传；若传档位 id 则解析成 providerId，为未来自动路由预留）
+      const effectiveProviderId = resolveProviderId(params.providerId)
+      const { client, model } = createClientForProvider(effectiveProviderId)
       const ac = new AbortController()
       abortMap.set(reqId, ac)
 
@@ -1102,6 +1105,23 @@ function registerConversationHandlers() {
         const row = db.select().from(conversations).where(eq(conversations.id, id)).get()
         if (!row) return err('会话不存在')
         return ok(rowToConversation(row))
+      } catch (e) {
+        return err(String(e))
+      }
+    },
+  )
+
+  // M15：设置会话默认 provider（档位/模型选择的会话级记忆，复用闲置字段 defaultProviderId）
+  ipcMain.handle(
+    'conversation:setProvider',
+    (_, id: string, providerId: string): IpcResult<true> => {
+      try {
+        const db = getDb()
+        db.update(conversations)
+          .set({ defaultProviderId: providerId, updatedAt: Math.floor(Date.now() / 1000) })
+          .where(eq(conversations.id, id))
+          .run()
+        return ok(true)
       } catch (e) {
         return err(String(e))
       }
