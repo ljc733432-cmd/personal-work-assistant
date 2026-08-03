@@ -473,25 +473,28 @@ function MessageBubble({ msg }: { msg: ChatMessage }) {
 
   return (
     <div className={`flex gap-3 ${isUser ? 'flex-row-reverse' : 'flex-row'}`}>
-      {/* 头像 */}
+      {/* 头像（v1.3：用户用 accent 渐变 + 阴影，AI 用 surface-3 + border）*/}
       <div
-        className={`mt-0.5 flex h-7 w-7 flex-shrink-0 items-center justify-center rounded-full ${
-          isUser ? 'bg-primary text-primary-foreground' : 'bg-muted text-muted-foreground'
+        className={`mt-0.5 flex h-7 w-7 flex-shrink-0 items-center justify-center rounded-full shadow-sm ${
+          isUser
+            ? 'bg-primary text-primary-foreground'
+            : 'border border-border bg-surface-3 text-muted-foreground'
         }`}
       >
-        {isUser ? <User size={16} /> : isTool ? <Wrench size={15} /> : <Bot size={16} />}
+        {isUser ? <User size={16} weight="fill" /> : isTool ? <Wrench size={15} weight="fill" /> : <Bot size={16} weight="fill" />}
       </div>
 
-      {/* 签名消息块：无圆角 + 左侧 2px role 色条。宽度自适应内容（≤80%）。 */}
+      {/* 签名消息块 v2（v1.3 Soft UI）：无圆角 + 左侧 2px role 色条 + shadow 浮起 */}
       <div className={`flex max-w-[80%] flex-col gap-1.5 ${isUser ? 'items-end' : 'items-start'}`}>
-        {/* 工具调用 chips：紧凑单行，路径等信息要可见 */}
+        {/* 工具调用 chips（v1.3：加 Wrench 图标 + 精致样式）*/}
         {hasTools && (
           <div className="flex flex-wrap gap-1">
             {msg.toolCalls!.map((tc, i) => (
               <div
                 key={i}
-                className="inline-flex items-center gap-1 border border-border bg-muted/40 px-1.5 py-0.5 text-[11px] text-muted-foreground"
+                className="inline-flex items-center gap-1 rounded-md border border-border bg-surface-3 px-2 py-0.5 text-[11px] text-muted-foreground shadow-xs"
               >
+                <Wrench size={11} weight="fill" className="text-accent" />
                 <span className="font-medium text-foreground/80">{tc.name}</span>
                 {tc.args && tc.args !== '{}' && (
                   <span className="max-w-[320px] truncate font-mono text-[10px] opacity-70" title={tc.args}>
@@ -503,25 +506,34 @@ function MessageBubble({ msg }: { msg: ChatMessage }) {
           </div>
         )}
 
-        {/* 消息块主体 */}
+        {/* 消息块主体（v1.3：bg-surface-2 + shadow-sm 浮起 + hover 加深）*/}
         {(hasContent || msg.streaming) && (
           <div
-            className={`min-w-0 border-l-2 bg-muted/40 px-3.5 py-2.5 ${barColor} ${
-              isUser ? 'text-foreground' : 'text-foreground'
-            }`}
+            className={`min-w-0 rounded-r-md border-l-2 bg-surface-2 px-3.5 py-2.5 shadow-sm transition-shadow duration-200 hover:shadow-md ${barColor}`}
           >
-            {/* 角色标签行（极小，灰） */}
+            {/* 角色标签行（极小，灰）*/}
             <div className="mb-1 text-[10px] font-medium uppercase tracking-wide text-muted-foreground">
               {label}
             </div>
             {hasContent ? (
               <Markdown content={msg.content} />
             ) : (
-              <span className="text-sm text-muted-foreground">…</span>
+              // 流式中空内容：三圆点 typing 指示器（skill 推荐，替代省略号）
+              <span className="typing-dots">
+                <span />
+                <span />
+                <span />
+              </span>
             )}
-            {/* 流式光标：accent 色闪烁竖条 */}
-            {msg.streaming && (
-              <span className="ml-0.5 inline-block h-3.5 w-1.5 animate-pulse bg-accent align-text-bottom" />
+            {/* 有内容时的流式光标：三圆点（紧贴文末）*/}
+            {msg.streaming && hasContent && (
+              <span className="ml-1 inline-flex items-center align-middle">
+                <span className="typing-dots">
+                  <span />
+                  <span />
+                  <span />
+                </span>
+              </span>
             )}
           </div>
         )}

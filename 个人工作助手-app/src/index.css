@@ -143,6 +143,45 @@
 /* highlight.js 主题（浅色）。深色主题切换时 hljs 类名可后置处理，v1.2 先保持 github.css。 */
 @import 'highlight.js/styles/github.css';
 
+/* ===== v1.3 动效：流式 typing 三圆点 + 列表 stagger 入场 ===== */
+/* skill 推荐的 typing indicator：三圆点错峰 pulse，比竖条光标更现代 */
+@keyframes typing-dot {
+  0%, 60%, 100% { opacity: 0.3; transform: translateY(0); }
+  30% { opacity: 1; transform: translateY(-2px); }
+}
+.typing-dots {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+}
+.typing-dots span {
+  width: 5px;
+  height: 5px;
+  border-radius: 50%;
+  background: hsl(var(--accent));
+  animation: typing-dot 1.2s infinite ease-in-out;
+}
+.typing-dots span:nth-child(2) { animation-delay: 0.15s; }
+.typing-dots span:nth-child(3) { animation-delay: 0.3s; }
+
+/* 列表 stagger 入场（治「单调」：列表项错峰浮现）*/
+@keyframes stagger-in {
+  from { opacity: 0; transform: translateY(8px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+.stagger-item {
+  animation: stagger-in 0.3s ease-out both;
+}
+
+/* 尊重系统减少动效设置（skill UX 准则）*/
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+  }
+}
+
 /* ===== 消息 Markdown 排版（prose 简化版） ===== */
 .msg-markdown {
   font-size: 0.875rem;
