@@ -88,7 +88,7 @@ export function ExtractSection() {
           </span>
         </label>
         {autoExtract && !extractProviderId && (
-          <p className="text-xs text-amber-600">开启自动抽取需先选择抽取模型。</p>
+          <p className="text-xs text-warning">开启自动抽取需先选择抽取模型。</p>
         )}
       </div>
     </div>

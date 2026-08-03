@@ -1,8 +1,7 @@
 import { useEffect, useRef, useState } from 'react'
-import { Sparkles, MessageSquare, User, Bot, Loader2 } from 'lucide-react'
+import { Sparkles, MessageSquare, User, Bot, Wrench, Loader2 } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Textarea } from '@/components/ui/textarea'
-import { Card } from '@/components/ui/card'
 import { Markdown } from '@/components/Markdown'
 import { ConfirmDialog } from '@/components/ui/dialog'
 import { useProvidersStore } from '@/stores/providers'
@@ -337,7 +336,7 @@ export function ChatPage() {
         )}
         {error && <span className="text-xs text-destructive">{error}</span>}
         {truncatedNotice && (
-          <span className="text-xs text-amber-600">{truncatedNotice}</span>
+          <span className="text-xs text-warning">{truncatedNotice}</span>
         )}
         {/* M4：手动抽取任务草稿（✨ 按钮） */}
         <Button
@@ -393,9 +392,9 @@ export function ChatPage() {
 
       {/* M4：任务草稿区（有草稿才显示，在消息区和输入区之间） */}
       {drafts.length > 0 && (
-        <div className="border-t bg-amber-50/30 px-4 py-3">
+        <div className="border-t bg-warning/5 px-4 py-3">
           <div className="mx-auto max-w-3xl space-y-2">
-            <div className="text-xs font-medium text-amber-700">
+            <div className="text-xs font-medium text-warning">
               AI 识别到 {drafts.length} 条任务草稿，确认后加入任务
             </div>
             <div className="space-y-2">
@@ -457,31 +456,41 @@ export function ChatPage() {
   )
 }
 
+// v1.2 签名元素（PRD §12.2.4）：无圆角消息块 + 左侧 2px role 色条。
+// 抛弃默认圆角气泡，每条消息是左对齐矩形块，色条编码角色：
+//   user=accent 蓝 / assistant=muted-foreground 灰 / tool=success 绿
+// 视觉上像精装卷宗的条目，区别于所有圆角气泡的 AI 应用。
 function MessageBubble({ msg }: { msg: ChatMessage }) {
-  const isUser = msg.role === 'user'
+  const role = msg.role // user / assistant / tool / system
   const hasContent = msg.content.trim().length > 0
   const hasTools = (msg.toolCalls?.length ?? 0) > 0
 
+  // role → 色条颜色 + 头像 + 标签
+  const isUser = role === 'user'
+  const isTool = role === 'tool'
+  const barColor = isUser ? 'border-accent' : isTool ? 'border-success' : 'border-muted-foreground/50'
+  const label = isUser ? '我' : isTool ? '工具' : 'AI'
+
   return (
-    <div className={`flex gap-2.5 ${isUser ? 'flex-row-reverse' : 'flex-row'}`}>
+    <div className={`flex gap-3 ${isUser ? 'flex-row-reverse' : 'flex-row'}`}>
       {/* 头像 */}
       <div
         className={`mt-0.5 flex h-7 w-7 flex-shrink-0 items-center justify-center rounded-full ${
           isUser ? 'bg-primary text-primary-foreground' : 'bg-muted text-muted-foreground'
         }`}
       >
-        {isUser ? <User size={16} strokeWidth={2} /> : <Bot size={16} strokeWidth={2} />}
+        {isUser ? <User size={16} strokeWidth={2} /> : isTool ? <Wrench size={15} strokeWidth={2} /> : <Bot size={16} strokeWidth={2} />}
       </div>
 
-      {/* 内容区 */}
+      {/* 签名消息块：无圆角 + 左侧 2px role 色条。宽度自适应内容（≤80%）。 */}
       <div className={`flex max-w-[80%] flex-col gap-1.5 ${isUser ? 'items-end' : 'items-start'}`}>
-        {/* 工具调用：紧凑单行显示，不折叠（路径等信息要可见） */}
+        {/* 工具调用 chips：紧凑单行，路径等信息要可见 */}
         {hasTools && (
           <div className="flex flex-wrap gap-1">
             {msg.toolCalls!.map((tc, i) => (
               <div
                 key={i}
-                className="inline-flex items-center gap-1 rounded border border-border bg-muted/40 px-1.5 py-0.5 text-[11px] text-muted-foreground"
+                className="inline-flex items-center gap-1 border border-border bg-muted/40 px-1.5 py-0.5 text-[11px] text-muted-foreground"
               >
                 <span className="font-medium text-foreground/80">{tc.name}</span>
                 {tc.args && tc.args !== '{}' && (
@@ -494,29 +503,27 @@ function MessageBubble({ msg }: { msg: ChatMessage }) {
           </div>
         )}
 
-        {/* 消息气泡 */}
+        {/* 消息块主体 */}
         {(hasContent || msg.streaming) && (
-          <Card
-            className={`px-3.5 py-2.5 ${
-              isUser
-                ? 'rounded-br-sm bg-primary text-primary-foreground'
-                : 'rounded-bl-sm bg-card'
+          <div
+            className={`min-w-0 border-l-2 bg-muted/40 px-3.5 py-2.5 ${barColor} ${
+              isUser ? 'text-foreground' : 'text-foreground'
             }`}
           >
+            {/* 角色标签行（极小，灰） */}
+            <div className="mb-1 text-[10px] font-medium uppercase tracking-wide text-muted-foreground">
+              {label}
+            </div>
             {hasContent ? (
-              isUser ? (
-                // 用户消息也用 Markdown（支持它发代码/列表）
-                <Markdown content={msg.content} />
-              ) : (
-                <Markdown content={msg.content} />
-              )
+              <Markdown content={msg.content} />
             ) : (
               <span className="text-sm text-muted-foreground">…</span>
             )}
+            {/* 流式光标：accent 色闪烁竖条 */}
             {msg.streaming && (
-              <span className="ml-0.5 inline-block h-3.5 w-1.5 animate-pulse bg-current align-text-bottom" />
+              <span className="ml-0.5 inline-block h-3.5 w-1.5 animate-pulse bg-accent align-text-bottom" />
             )}
-          </Card>
+          </div>
         )}
       </div>
     </div>

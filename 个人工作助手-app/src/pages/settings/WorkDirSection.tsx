@@ -73,8 +73,8 @@ function WorkDirCard({
           <span
             className={`rounded px-1.5 py-0.5 text-[10px] font-medium uppercase ${
               mode === 'readwrite'
-                ? 'bg-amber-100 text-amber-700'
-                : 'bg-blue-100 text-blue-700'
+                ? 'bg-warning/10 text-warning'
+                : 'bg-info/10 text-info'
             }`}
           >
             {mode === 'readwrite' ? '读写' : '只读'}

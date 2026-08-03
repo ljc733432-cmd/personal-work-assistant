@@ -14,10 +14,12 @@ const STATUS_LABEL: Record<TaskStatus, string> = {
   in_progress: '进行中',
   done: '已完成',
 }
+// v1.2：状态/优先级色走语义 token（success/warning/danger/info/muted），
+// 不再用 Tailwind 原生 slate/blue/green/amber/red 类（PRD §12.4 + 验收 V-O）。
 const STATUS_STYLE: Record<TaskStatus, string> = {
-  todo: 'bg-slate-100 text-slate-600',
-  in_progress: 'bg-blue-100 text-blue-700',
-  done: 'bg-green-100 text-green-700',
+  todo: 'bg-muted text-muted-foreground',
+  in_progress: 'bg-info/10 text-info',
+  done: 'bg-success/10 text-success',
 }
 const PRIORITY_LABEL: Record<TaskPriority, string> = {
   low: '低',
@@ -25,9 +27,9 @@ const PRIORITY_LABEL: Record<TaskPriority, string> = {
   high: '高',
 }
 const PRIORITY_STYLE: Record<TaskPriority, string> = {
-  low: 'bg-slate-100 text-slate-600',
-  medium: 'bg-amber-100 text-amber-700',
-  high: 'bg-red-100 text-red-700',
+  low: 'bg-muted text-muted-foreground',
+  medium: 'bg-warning/10 text-warning',
+  high: 'bg-danger/10 text-danger',
 }
 
 type Filter = 'all' | TaskStatus
@@ -233,7 +235,7 @@ function TaskCard({
               onClick={onToggleDone}
               title={done ? '标记为待办' : '标记完成'}
               className={`mt-0.5 flex h-5 w-5 flex-shrink-0 items-center justify-center rounded border-2 transition-colors ${
-                done ? 'border-green-500 bg-green-500 text-white' : 'border-muted-foreground/40 hover:border-primary'
+                done ? 'border-success bg-success text-primary-foreground' : 'border-muted-foreground/40 hover:border-primary'
               }`}
             >
               {done && <Check size={12} strokeWidth={3} />}
@@ -255,7 +257,7 @@ function TaskCard({
             </span>
           )}
           {task.source === 'from_chat' && (
-            <span className="rounded bg-purple-100 px-1.5 py-0.5 text-[10px] text-purple-700">来自对话</span>
+            <span className="rounded bg-accent/10 px-1.5 py-0.5 text-[10px] text-accent">来自对话</span>
           )}
           <div className="ml-auto flex items-center gap-1">
             <Button size="sm" variant="ghost" onClick={onEdit}>

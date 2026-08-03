@@ -31,9 +31,9 @@ export function DraftCard({
   onDismiss: () => void
 }) {
   return (
-    <Card className="border-amber-300 bg-amber-50/40">
+    <Card className="border-warning/40 bg-warning/5">
       <CardContent className="space-y-2 pt-4">
-        <div className="flex items-center gap-1.5 text-[10px] font-medium uppercase tracking-wider text-amber-700">
+        <div className="flex items-center gap-1.5 text-[10px] font-medium uppercase tracking-wider text-warning">
           <span>草稿</span>
         </div>
         <Input
