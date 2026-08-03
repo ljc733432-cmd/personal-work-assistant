@@ -128,6 +128,56 @@ write_file 覆盖已存在文件时，FC 循环**挂起**：返回 `{kind:'confi
 
 ---
 
+## D2. v1.2 工具扩展域（M12.5~M12.9）
+
+### **双轨制（Dual Track，v1.2）**
+工具的两种形态，服从用途而非强求统一（PRD §13.1）：
+- **A 轨（FC 工具）**：注册进 `assembleTools`，AI 在对话中调用（如 `create_note` `set_reminder` `convert_document`）。
+- **B 轨（手动页面）**：独立 React 页面 + IPC，用户主动用（如笔记编辑器、番茄钟、转换器 UI）。
+- **关键约束**：A 轨与 B 轨**共享同一存储层**（笔记库目录 / reminders 表），保证不是两套孤立系统。
+- **不要叫**："插件"/"扩展"——双轨制特指 FC + 手动页面的组合形态。
+
+### **Reminder（提醒）**
+到点告诉一件事的信号（PRD §13.2 工具 2）。`{id, time, content, done, source, createdAt}`。
+- **与 Task 的区别**：Task 是「有截止日的工作」（有完成度）；Reminder 是「响一下就完」的信号，不进任务列表。
+- **source**：`manual`（工具页手建）/ `from_chat`（AI 从对话抽取）。
+- **无副作用**：PRD §13.2 明确提醒可随时删，AI 抽取**无需人工确认**直接入库（区别于任务抽取草稿）。
+- **调度**：复用 node-cron 同源的 setInterval 轮询（每分钟扫到期），非 cron 定点（提醒时间任意到分）。
+
+### **PomodoroSession（番茄钟历史）**
+专注计时记录（PRD §13.2 工具 2）。`{startedAt, durationMin, taskId?, completed}`。
+- **纯 B 轨**：计时器做成 FC 无意义（AI 无法「开始一个 25 分钟」）。
+- **常驻侧栏小部件**：PRD §12.3 要求常驻，本项目放侧栏底部（单一挂载点比改顶栏简单）。
+- **默认 25 分钟**：PRD §13.2 三档可配，v1.2 先做 25。
+
+### **Notes / 笔记（v1.2 工具 1）**
+纯本地 Markdown 笔记库（PRD §13.2）。`Note = {id, title, tags, content, createdAt, updatedAt, fileName}`。
+- **存储**：纯 `.md` 文件 + frontmatter，**不入库**（v2 才加索引层）。frontmatter 存 id/title/tags/时间戳。
+- **笔记库目录（notes.rootDir）**：settings KV 配置，默认 `userData/notes/`。**自动加入文件工具白名单**（readwrite），AI 能直接读写，无需用户额外配。
+- **搜索**：v1.2 文件遍历 + 字符串匹配（限制 <500 条），v2 加索引。
+- **双轨**：A 轨 `create_note/search_notes/read_note/update_note`（update 走二次确认，覆盖原内容）；B 轨笔记页 CRUD。
+- **不要叫**："备忘录"/"文档"——Notes 特指本地 .md 笔记库。
+
+### **Document Converter（文档转换，v1.2 工具 3）**
+格式转换（PRD §13.2）。`{inputPath, targetFormat, outputPath?}`。
+- **支持矩阵**：md↔txt、md→html/docx/pdf、docx→md/txt/html。
+- **PDF 生成**：pdfkit + 系统字体 `simhei.ttf`（TV-4 验证；pdfkit 不支持 .ttc）。
+- **安全**：输入输出路径经 `resolveSafePath`（白名单/笔记库）。
+- **无破坏性**：原文件不动，输出到同目录换扩展名。不走二次确认。
+
+### **语义色 token（Semantic Color Token，v1.2 UI）**
+取代散落的 Tailwind 原生色类（`bg-blue-100` 等）。见 PRD §12.2.1 + 验收 V-O。
+- `--success`（完成/通过）/ `--warning`（草稿/警示）/ `--danger`（错误/危险）/ `--info`（信息提示，同 accent）。
+- 所有业务组件**禁止**用 `bg-slate-/bg-blue-/bg-green-` 等原生类，必须走 token。
+- grep 治理：验收 V-O 要求全项目 0 处原生色类残留。
+
+### **签名消息块（Signature Message Block，v1.2 UI）**
+PRD §12.2.4 签名元素：无圆角矩形 + 左侧 2px role 色条。
+- user=accent 蓝 / assistant=muted-foreground 灰 / tool=success 绿。
+- 区别于所有圆角气泡的 AI 应用，像精装卷宗条目。
+
+---
+
 ## E. 基础设施域
 
 ### **safeStorage**
@@ -176,3 +226,6 @@ PRD §7 验收优先级。P0 必做 = v1 完成；P1 可选。
 | 提醒 / 推送 | **跟进 / 桌面通知**（区分：跟进=AI 主动扫任务+对话；通知=系统弹窗） |
 | 文件夹 / 路径 | **工作目录白名单**（特指设置里配的目录） |
 | 删除文件 | **进回收站**（不直接删，进 fileTrash 可恢复） |
+| 提醒 / 推送（指到点响一下的信号） | **Reminder**（区别于跟进=AI 主动扫任务+对话） |
+| 备忘录 / 文档 | **笔记（Notes）**（特指本地 .md 笔记库） |
+| 插件 / 扩展 | **双轨制**（FC 工具 + 手动页面的组合形态） |
