@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react'
-import { Timer, Play, Pause, RotateCcw } from 'lucide-react'
+import { Timer, Play, Pause, RotateCcw } from '@/components/ui/icons'
 import { invoke } from '@/lib/ipc'
 import { cn } from '@/lib/utils'
 
@@ -94,23 +94,23 @@ export function PomodoroWidget() {
         )}
         title={phase === 'idle' ? '番茄钟' : phase === 'running' ? '专注中' : '已暂停'}
       >
-        <Timer size={12} strokeWidth={2} />
+        <Timer size={12} />
         <span>{mm}:{ss}</span>
       </div>
       {/* 控制按钮：紧凑单行 */}
       <div className="flex items-center gap-0.5">
         {phase === 'running' ? (
           <button onClick={handlePause} title="暂停" className="rounded p-1 text-muted-foreground hover:bg-accent hover:text-accent-foreground">
-            <Pause size={14} strokeWidth={2} />
+            <Pause size={14} />
           </button>
         ) : (
           <button onClick={handleStart} title={phase === 'paused' ? '继续' : '开始专注'} className="rounded p-1 text-muted-foreground hover:bg-accent hover:text-accent-foreground">
-            <Play size={14} strokeWidth={2} />
+            <Play size={14} />
           </button>
         )}
         {phase !== 'idle' && (
           <button onClick={handleReset} title="复位" className="rounded p-1 text-muted-foreground hover:bg-accent hover:text-accent-foreground">
-            <RotateCcw size={12} strokeWidth={2} />
+            <RotateCcw size={12} />
           </button>
         )}
       </div>

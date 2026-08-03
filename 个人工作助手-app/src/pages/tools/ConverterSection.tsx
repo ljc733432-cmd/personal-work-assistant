@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react'
-import { FileText, ArrowRight, Loader2, CheckCircle2, AlertCircle } from 'lucide-react'
+import { FileText, ArrowRight, Loader2, CheckCircle2, AlertCircle } from '@/components/ui/icons'
 import { Button } from '@/components/ui/button'
 import { invoke } from '@/lib/ipc'
 import { BackHeader } from './ToolsPage'
@@ -93,7 +93,7 @@ export function ConverterSection({ onBack }: { onBack: () => void }) {
             <div className="text-xs font-medium uppercase tracking-wide text-muted-foreground">第 1 步 · 选择文件</div>
             {inputPath ? (
               <div className="flex items-center gap-2">
-                <FileText size={16} strokeWidth={2} className="flex-shrink-0 text-accent" />
+                <FileText size={16} className="flex-shrink-0 text-accent" />
                 <div className="min-w-0 flex-1">
                   <div className="truncate text-sm font-medium">{fileName}</div>
                   <div className="truncate text-xs text-muted-foreground">{inputPath}</div>
@@ -104,7 +104,7 @@ export function ConverterSection({ onBack }: { onBack: () => void }) {
               </div>
             ) : (
               <Button variant="outline" onClick={handlePick} className="w-full gap-1.5 border-dashed">
-                <FileText size={14} strokeWidth={2} />
+                <FileText size={14} />
                 选择要转换的文件（md / txt / docx）
               </Button>
             )}
@@ -145,13 +145,13 @@ export function ConverterSection({ onBack }: { onBack: () => void }) {
               <div className="text-xs font-medium uppercase tracking-wide text-muted-foreground">第 3 步 · 执行</div>
               <div className="flex items-center gap-2 text-sm text-muted-foreground">
                 <span className="truncate">{fileName}</span>
-                <ArrowRight size={14} strokeWidth={2} />
+                <ArrowRight size={14} />
                 <span className="font-medium text-foreground">{target.toUpperCase()}</span>
               </div>
               <Button onClick={handleConvert} disabled={status.kind === 'converting'} className="gap-1.5">
                 {status.kind === 'converting' ? (
                   <>
-                    <Loader2 size={14} strokeWidth={2} className="animate-spin" />
+                    <Loader2 size={14} className="animate-spin" />
                     转换中…
                   </>
                 ) : (
@@ -169,7 +169,7 @@ export function ConverterSection({ onBack }: { onBack: () => void }) {
           {/* 结果反馈 */}
           {status.kind === 'done' && (
             <div className="flex items-start gap-2 border border-success/40 bg-success/5 p-3">
-              <CheckCircle2 size={16} strokeWidth={2} className="mt-0.5 flex-shrink-0 text-success" />
+              <CheckCircle2 size={16} className="mt-0.5 flex-shrink-0 text-success" />
               <div className="min-w-0 flex-1">
                 <div className="text-sm font-medium text-success">转换成功</div>
                 <div className="mt-0.5 truncate text-xs text-muted-foreground">{status.path}</div>
@@ -179,7 +179,7 @@ export function ConverterSection({ onBack }: { onBack: () => void }) {
           )}
           {status.kind === 'error' && (
             <div className="flex items-start gap-2 border border-danger/40 bg-danger/5 p-3">
-              <AlertCircle size={16} strokeWidth={2} className="mt-0.5 flex-shrink-0 text-danger" />
+              <AlertCircle size={16} className="mt-0.5 flex-shrink-0 text-danger" />
               <div className="min-w-0 flex-1">
                 <div className="text-sm font-medium text-danger">转换失败</div>
                 <div className="mt-0.5 text-xs text-muted-foreground">{status.message}</div>

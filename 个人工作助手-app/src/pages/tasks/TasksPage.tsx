@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from 'react'
-import { Check, Plus } from 'lucide-react'
+import { Check, Plus } from '@/components/ui/icons'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
@@ -238,7 +238,7 @@ function TaskCard({
                 done ? 'border-success bg-success text-primary-foreground' : 'border-muted-foreground/40 hover:border-primary'
               }`}
             >
-              {done && <Check size={12} strokeWidth={3} />}
+              {done && <Check size={12} />}
             </button>
             <div className="space-y-1">
               <div className={`font-medium ${done ? 'line-through' : ''}`}>{task.title}</div>
@@ -282,7 +282,7 @@ function AddTaskCard({ onAdd }: { onAdd: (input: TaskInput) => void }) {
   if (!open) {
     return (
       <Button variant="outline" className="w-full gap-1.5 border-dashed" onClick={() => setOpen(true)}>
-        <Plus size={14} strokeWidth={2} /> 添加任务
+        <Plus size={14} /> 添加任务
       </Button>
     )
   }

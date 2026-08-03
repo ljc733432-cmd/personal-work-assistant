@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react'
-import { Sparkles, MessageSquare, User, Bot, Wrench, Loader2 } from 'lucide-react'
+import { Sparkles, MessageSquare, User, Bot, Wrench, Loader2 } from '@/components/ui/icons'
 import { Button } from '@/components/ui/button'
 import { Textarea } from '@/components/ui/textarea'
 import { Markdown } from '@/components/Markdown'
@@ -372,7 +372,7 @@ export function ChatPage() {
           {messages.length === 0 && (
             <div className="mt-12 space-y-3 text-center">
               <div className="mx-auto flex h-14 w-14 items-center justify-center rounded-2xl bg-primary/10 text-primary/60">
-                <MessageSquare size={28} strokeWidth={2} />
+                <MessageSquare size={28} />
               </div>
               <div>
                 <p className="text-base font-medium text-foreground">开始对话</p>
@@ -479,7 +479,7 @@ function MessageBubble({ msg }: { msg: ChatMessage }) {
           isUser ? 'bg-primary text-primary-foreground' : 'bg-muted text-muted-foreground'
         }`}
       >
-        {isUser ? <User size={16} strokeWidth={2} /> : isTool ? <Wrench size={15} strokeWidth={2} /> : <Bot size={16} strokeWidth={2} />}
+        {isUser ? <User size={16} /> : isTool ? <Wrench size={15} /> : <Bot size={16} />}
       </div>
 
       {/* 签名消息块：无圆角 + 左侧 2px role 色条。宽度自适应内容（≤80%）。 */}

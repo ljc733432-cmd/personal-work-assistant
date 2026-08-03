@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react'
-import { FolderOpen } from 'lucide-react'
+import { FolderOpen } from '@/components/ui/icons'
 import { Button } from '@/components/ui/button'
 import { invoke } from '@/lib/ipc'
 
@@ -55,7 +55,7 @@ export function NotesSection() {
             {dir}
           </code>
           <Button variant="outline" size="sm" onClick={handlePick} className="gap-1.5">
-            <FolderOpen size={14} strokeWidth={2} />
+            <FolderOpen size={14} />
             选择目录
           </Button>
           <Button variant="ghost" size="sm" onClick={handleReset}>

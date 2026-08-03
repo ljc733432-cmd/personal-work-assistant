@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react'
-import { Plus } from 'lucide-react'
+import { Plus } from '@/components/ui/icons'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
@@ -166,7 +166,7 @@ function AddSearchProviderCard({ onAdd }: { onAdd: (input: SearchProviderInput) 
   if (!open) {
     return (
       <Button variant="outline" className="w-full gap-1.5 border-dashed" onClick={() => setOpen(true)}>
-        <Plus size={14} strokeWidth={2} /> 添加搜索 Provider
+        <Plus size={14} /> 添加搜索 Provider
       </Button>
     )
   }

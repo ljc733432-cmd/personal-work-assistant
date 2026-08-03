@@ -1,5 +1,5 @@
 import { useState } from 'react'
-import { Bell, Timer, FileText, ArrowLeft } from 'lucide-react'
+import { Bell, Timer, FileText, ArrowLeft } from '@/components/ui/icons'
 import { cn } from '@/lib/utils'
 import { ReminderSection } from './ReminderSection'
 import { ConverterSection } from './ConverterSection'
@@ -71,7 +71,7 @@ function ToolCard({
         onClick ? 'hover:bg-accent/5' : 'cursor-not-allowed opacity-60',
       )}
     >
-      <Icon size={20} strokeWidth={2} className="text-accent" />
+      <Icon size={20} className="text-accent" />
       <div className="font-medium">{title}</div>
       <div className="text-xs text-muted-foreground">{desc}</div>
     </button>
@@ -86,7 +86,7 @@ export function BackHeader({ title, onBack }: { title: string; onBack: () => voi
         onClick={onBack}
         className="flex items-center gap-1 text-sm text-muted-foreground transition-colors hover:text-foreground"
       >
-        <ArrowLeft size={16} strokeWidth={2} />
+        <ArrowLeft size={16} />
         返回
       </button>
       <span className="text-sm font-medium">{title}</span>

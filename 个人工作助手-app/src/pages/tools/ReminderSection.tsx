@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react'
-import { Plus, Trash2, Bell, CheckCircle2 } from 'lucide-react'
+import { Plus, Trash2, Bell, CheckCircle2 } from '@/components/ui/icons'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
@@ -69,7 +69,7 @@ export function ReminderSection({ onBack }: { onBack: () => void }) {
                 />
               </div>
               <Button onClick={handleAdd} disabled={adding || !content.trim()} className="gap-1.5">
-                <Plus size={14} strokeWidth={2} />
+                <Plus size={14} />
                 添加
               </Button>
             </div>
@@ -120,9 +120,9 @@ function ReminderItem({ reminder, onDelete }: { reminder: Reminder; onDelete: ()
     >
       <div className="mt-0.5 flex-shrink-0 text-muted-foreground">
         {reminder.done ? (
-          <CheckCircle2 size={16} strokeWidth={2} />
+          <CheckCircle2 size={16} />
         ) : (
-          <Bell size={16} strokeWidth={2} />
+          <Bell size={16} />
         )}
       </div>
       <div className="min-w-0 flex-1">
@@ -144,7 +144,7 @@ function ReminderItem({ reminder, onDelete }: { reminder: Reminder; onDelete: ()
         title="删除"
         className="flex-shrink-0 text-muted-foreground transition-colors hover:text-danger"
       >
-        <Trash2 size={14} strokeWidth={2} />
+        <Trash2 size={14} />
       </button>
     </div>
   )

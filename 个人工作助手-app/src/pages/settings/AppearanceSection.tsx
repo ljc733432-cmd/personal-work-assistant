@@ -1,4 +1,4 @@
-import { Monitor, Sun, Moon } from 'lucide-react'
+import { Monitor, Sun, Moon } from '@/components/ui/icons'
 import { useThemeStore, type ThemeMode } from '@/stores/theme'
 import { cn } from '@/lib/utils'
 
@@ -36,7 +36,7 @@ export function AppearanceSection() {
                   : 'border-border text-muted-foreground hover:bg-accent/5',
               )}
             >
-              <Icon size={18} strokeWidth={2} />
+              <Icon size={18} />
               <span>{opt.label}</span>
             </button>
           )

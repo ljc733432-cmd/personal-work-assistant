@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react'
-import { MessageSquare, CheckSquare, Settings, StickyNote, Wrench, Sun, Moon } from 'lucide-react'
+import { MessageSquare, CheckSquare, Settings, StickyNote, Wrench, Sun, Moon } from '@/components/ui/icons'
 import { cn } from '@/lib/utils'
 import { on } from '@/lib/ipc'
 import { useChatStore } from '@/stores/chat'
@@ -44,22 +44,22 @@ function App() {
       {/* 侧栏：64px 纯图标，hairline 分隔分组（PRD §12.3）*/}
       <nav className="flex w-16 flex-col items-center gap-1 border-r bg-card py-4">
         <NavBtn active={tab === 'chat'} onClick={() => setTab('chat')} label="对话">
-          <MessageSquare size={20} strokeWidth={2} />
+          <MessageSquare size={20} />
         </NavBtn>
         <NavBtn active={tab === 'tasks'} onClick={() => setTab('tasks')} label="任务">
-          <CheckSquare size={20} strokeWidth={2} />
+          <CheckSquare size={20} />
         </NavBtn>
         <NavBtn active={tab === 'notes'} onClick={() => setTab('notes')} label="笔记">
-          <StickyNote size={20} strokeWidth={2} />
+          <StickyNote size={20} />
         </NavBtn>
         <NavBtn active={tab === 'tools'} onClick={() => setTab('tools')} label="工具">
-          <Wrench size={20} strokeWidth={2} />
+          <Wrench size={20} />
         </NavBtn>
 
         {/* 分组分隔（hairline）+ 设置 */}
         <div className="my-2 h-px w-6 bg-border" />
         <NavBtn active={tab === 'settings'} onClick={() => setTab('settings')} label="设置">
-          <Settings size={20} strokeWidth={2} />
+          <Settings size={20} />
         </NavBtn>
 
         {/* M12.6 番茄钟常驻小部件（PRD §12.3）*/}
@@ -73,7 +73,7 @@ function App() {
           title={resolved === 'dark' ? '切换到浅色' : '切换到深色'}
           className="mt-auto mb-2 flex h-10 w-10 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-accent"
         >
-          {resolved === 'dark' ? <Sun size={20} strokeWidth={2} /> : <Moon size={20} strokeWidth={2} />}
+          {resolved === 'dark' ? <Sun size={20} /> : <Moon size={20} />}
         </button>
 
         <div className="px-2 text-center text-[10px] leading-tight text-muted-foreground">

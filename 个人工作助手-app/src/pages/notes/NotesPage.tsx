@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react'
-import { Plus, Search, Eye, Pencil, Trash2, FileText } from 'lucide-react'
+import { Plus, Search, Eye, Pencil, Trash2, FileText } from '@/components/ui/icons'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Textarea } from '@/components/ui/textarea'
@@ -101,10 +101,10 @@ export function NotesPage() {
       <div className="flex w-[240px] flex-col border-r bg-card">
         <div className="space-y-2 border-b p-2">
           <Button onClick={handleNew} variant="outline" className="w-full justify-start gap-1.5">
-            <Plus size={14} strokeWidth={2} /> 新建笔记
+            <Plus size={14} /> 新建笔记
           </Button>
           <div className="relative">
-            <Search size={13} strokeWidth={2} className="absolute left-2 top-1/2 -translate-y-1/2 text-muted-foreground" />
+            <Search size={13} className="absolute left-2 top-1/2 -translate-y-1/2 text-muted-foreground" />
             <Input
               value={query}
               onChange={(e) => handleSearch(e.target.value)}
@@ -161,21 +161,21 @@ export function NotesPage() {
               >
                 {editing ? (
                   <>
-                    <Pencil size={13} strokeWidth={2} /> 保存
+                    <Pencil size={13} /> 保存
                   </>
                 ) : (
                   <>
-                    <Pencil size={13} strokeWidth={2} /> 编辑
+                    <Pencil size={13} /> 编辑
                   </>
                 )}
               </Button>
               {!editing && (
                 <Button size="sm" variant="outline" disabled className="h-8 gap-1.5 opacity-60">
-                  <Eye size={13} strokeWidth={2} /> 预览
+                  <Eye size={13} /> 预览
                 </Button>
               )}
               <Button size="sm" variant="ghost" onClick={handleDelete} className="h-8 text-destructive">
-                <Trash2 size={14} strokeWidth={2} />
+                <Trash2 size={14} />
               </Button>
             </div>
 
@@ -203,7 +203,7 @@ export function NotesPage() {
           </>
         ) : (
           <div className="flex h-full flex-col items-center justify-center gap-2 text-muted-foreground">
-            <FileText size={40} strokeWidth={1.5} className="text-muted-foreground/40" />
+            <FileText size={40} className="text-muted-foreground/40" />
             <div className="text-sm">从左侧选择一条笔记，或点「新建笔记」开始</div>
           </div>
         )}

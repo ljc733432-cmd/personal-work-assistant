@@ -48,7 +48,6 @@
     "drizzle-kit": "^0.30.0",
     "electron": "^42.1.0",
     "electron-builder": "^26.8.1",
-    "lucide-react": "^0.460.0",
     "react": "^19.2.7",
     "react-dom": "^19.2.7",
     "tailwind-merge": "^2.6.0",
