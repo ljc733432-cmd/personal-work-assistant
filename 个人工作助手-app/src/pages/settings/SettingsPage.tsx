@@ -11,6 +11,7 @@ import { WorkDirSection } from './WorkDirSection'
 import { SearchProviderSection } from './SearchProviderSection'
 import { ExtractSection } from './ExtractSection'
 import { FollowupSection } from './FollowupSection'
+import { AppearanceSection } from './AppearanceSection'
 
 const PRESETS: Record<ProviderType, { baseURL: string; model: string }> = {
   deepseek: { baseURL: 'https://api.deepseek.com', model: 'deepseek-chat' },
@@ -71,6 +72,10 @@ export function SettingsPage() {
       ))}
 
       <AddProviderCard onAdd={(input) => upsert(input)} />
+
+        <div className="!mt-10 border-t pt-2">
+          <AppearanceSection />
+        </div>
 
         <div className="!mt-10 border-t pt-2">
           <WorkDirSection />

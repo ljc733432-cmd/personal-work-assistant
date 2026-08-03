@@ -1,8 +1,9 @@
 import { useEffect, useState } from 'react'
-import { MessageSquare, CheckSquare, Settings, StickyNote, Wrench } from 'lucide-react'
+import { MessageSquare, CheckSquare, Settings, StickyNote, Wrench, Sun, Moon } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import { on } from '@/lib/ipc'
 import { useChatStore } from '@/stores/chat'
+import { useThemeStore, startSystemThemeWatcher } from '@/stores/theme'
 import { ChatPage } from '@/pages/chat/ChatPage'
 import { SettingsPage } from '@/pages/settings/SettingsPage'
 import { TasksPage } from '@/pages/tasks/TasksPage'
@@ -14,6 +15,8 @@ type Tab = 'chat' | 'tasks' | 'notes' | 'tools' | 'settings'
 
 function App() {
   const [tab, setTab] = useState<Tab>('chat')
+  const resolved = useThemeStore((s) => s.resolved)
+  const setMode = useThemeStore((s) => s.setMode)
 
   // M6：订阅跟进通知点击 → 跳转到对话页 + 切到跟进会话
   useEffect(() => {
@@ -24,6 +27,14 @@ function App() {
       useChatStore.getState().switchConversation(ev.conversationId).catch(() => {})
     })
   }, [])
+
+  // v1.2：system 模式下监听系统主题变化，实时跟随
+  useEffect(() => startSystemThemeWatcher(), [])
+
+  // 底部主题按钮：点击在 light/dark 间切换（system 选项在设置页选）
+  const toggleTheme = () => {
+    void setMode(resolved === 'dark' ? 'light' : 'dark')
+  }
 
   return (
     <div className="flex h-screen w-screen overflow-hidden bg-background">
@@ -48,7 +59,16 @@ function App() {
           <Settings size={20} strokeWidth={2} />
         </NavBtn>
 
-        <div className="mt-auto px-2 text-center text-[10px] leading-tight text-muted-foreground">
+        {/* 底部主题切换：light/dark 间切换（system 在设置页选） */}
+        <button
+          onClick={toggleTheme}
+          title={resolved === 'dark' ? '切换到浅色' : '切换到深色'}
+          className="mt-auto mb-2 flex h-10 w-10 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-accent"
+        >
+          {resolved === 'dark' ? <Sun size={20} strokeWidth={2} /> : <Moon size={20} strokeWidth={2} />}
+        </button>
+
+        <div className="px-2 text-center text-[10px] leading-tight text-muted-foreground">
           <div>v1.2</div>
         </div>
       </nav>

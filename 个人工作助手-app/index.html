@@ -6,6 +6,18 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <meta http-equiv="Content-Security-Policy" content="script-src 'self' 'unsafe-inline';" />
     <title>个人工作助手</title>
+    <script>
+      // v1.2 防首屏主题闪烁：在 React 挂载前从 localStorage 读主题偏好，
+      // 立即给 <html> 加 .dark class。store 加载后还会从 settings 表校准。
+      // 必须内联在 head，且早于 main.tsx，否则会看到浅色闪一下再切深色。
+      (function () {
+        try {
+          var m = localStorage.getItem('pwa.theme') || 'system';
+          var dark = m === 'dark' || (m === 'system' && window.matchMedia('(prefers-color-scheme: dark)').matches);
+          if (dark) document.documentElement.classList.add('dark');
+        } catch (e) { /* localStorage 不可用时默认浅色 */ }
+      })();
+    </script>
   </head>
   <body>
     <div id="root"></div>
