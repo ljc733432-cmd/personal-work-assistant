@@ -40,9 +40,46 @@ export interface ChatMessage {
 }
 
 export interface ChatSendParams {
+  reqId: string
   providerId: string
   messages: { role: ChatRole; content: string }[]
   enableTools?: boolean
+  conversationId: string // M2：本轮归属会话，主进程据此落库
+}
+
+// ---------- Conversation / Message（M2 对话历史持久化） ----------
+export type ConversationType = 'normal' | 'followup'
+
+export interface Conversation {
+  id: string
+  title: string
+  type: ConversationType
+  scenarioId: string | null
+  defaultProviderId: string | null
+  pinned: boolean
+  createdAt: number
+  updatedAt: number
+}
+
+export interface ConversationInput {
+  id?: string
+  title?: string
+  type?: ConversationType
+  defaultProviderId?: string | null
+  pinned?: boolean
+}
+
+// 持久化的消息结构（带 id/conversationId/createdAt）。
+// 与内存 ChatMessage 区别：ChatMessage 无 id 外部键，是组件流式用的临时结构。
+export interface ConversationMessage {
+  id: string
+  conversationId: string
+  role: ChatRole
+  content: string
+  providerId: string | null
+  toolCalls: ToolCallInfo[] | null
+  attachments: unknown | null
+  createdAt: number
 }
 
 export type IpcResult<T> = { ok: true; data: T } | { ok: false; error: string }

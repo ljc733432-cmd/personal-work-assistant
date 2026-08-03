@@ -43,6 +43,8 @@ export interface ChatSendParams {
   providerId: string
   messages: ChatMessage[]
   enableTools?: boolean // 是否带工具（FC 实测开关）
+  /** M2：本轮归属的会话 id。主进程据此把 user/assistant 消息落库。 */
+  conversationId: string
 }
 
 // ---------- 流式事件（主进程 -> 渲染层） ----------
@@ -127,4 +129,55 @@ export interface TaskInput {
   // source/sourceConversationId/followupLog 由服务端控制，不入 TaskInput
   // （M3 手动建默认 source=manual；M4 抽取入库走单独路径填 from_chat）
   enabled?: boolean // 未用，保留以与 WorkDirInput 风格一致（可忽略）
+}
+
+// ---------- Conversation / Message（M2 对话历史持久化） ----------
+// 见 PRD §4.2、CONTEXT.md「Conversation」「Message」。
+// type=normal 普通会话；type=followup 跟进会话（M6）。
+export type ConversationType = 'normal' | 'followup'
+
+export interface Conversation {
+  id: string
+  title: string
+  type: ConversationType
+  scenarioId: string | null // M6 跟进场景，本轮恒 null
+  defaultProviderId: string | null // 会话级默认 Provider，可空
+  pinned: boolean
+  createdAt: number
+  updatedAt: number
+}
+
+export interface ConversationInput {
+  id?: string
+  title?: string // 可空：首次创建可由首条消息回填
+  type?: ConversationType // 默认 normal
+  defaultProviderId?: string | null
+  pinned?: boolean
+}
+
+// 消息（领域术语 Message）。TS 类型加 Conversation 前缀，
+// 与现有 ChatMessage（传给模型的无 id 结构，types.ts:34）区分：
+//  - ChatMessage = 内存/传输结构（role/content/toolCalls，无 id）
+//  - ConversationMessage = 持久化结构（带 id/conversationId/createdAt/providerId）
+export type MessageToolCall = { name: string; args: string } // args 为 JSON 字符串（与渲染层 ToolCallInfo 一致）
+
+export interface ConversationMessage {
+  id: string
+  conversationId: string
+  role: ChatRole
+  content: string
+  providerId: string | null
+  toolCalls: MessageToolCall[] | null
+  attachments: unknown | null // 预留
+  createdAt: number
+}
+
+// 单条消息新增入参（写操作由 chat:send 内部调用，不直接暴露给渲染层 upsert）
+export interface MessageInsertInput {
+  id?: string
+  conversationId: string
+  role: ChatRole
+  content: string
+  providerId?: string | null
+  toolCalls?: MessageToolCall[] | null
 }

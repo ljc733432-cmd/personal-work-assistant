@@ -50,12 +50,19 @@ function findTool(tools: ToolRegistration[] | undefined, name: string) {
   return tools?.find((t) => t.def.function.name === name)
 }
 
-export async function chatWithProvider(opts: RunOptions): Promise<void> {
+export async function chatWithProvider(opts: RunOptions): Promise<ChatResult> {
   const { client, model, messages, tools, onToken, onToolCall, onFirstToken, onConfirm, signal } = opts
 
   // 累积 messages，工具结果会追加进去
   const working: OpenAI.Chat.ChatCompletionMessageParam[] = toOpenAIMessages(messages)
   const openaiTools = toOpenAITools(tools)
+
+  // 跨轮累积「最终要落库的」信息（与渲染层合并式语义对齐）：
+  //  - finalText：所有轮 assistant 文本拼接（渲染层一条 aiMsg.content 就是这个）
+  //  - allToolCalls：所有轮的工具调用（渲染层 toolCalls 数组就是这个）
+  // 中间 tool 结果消息不累积（渲染层从没显示，落库也不需要）。
+  let finalText = ''
+  const allToolCalls: { name: string; args: string }[] = []
 
   for (let round = 0; round < MAX_TOOL_ROUNDS; round++) {
     const roundStart = Date.now()
@@ -117,8 +124,14 @@ export async function chatWithProvider(opts: RunOptions): Promise<void> {
     }
     working.push(assistantMsg)
 
+    // 累积本轮文本与工具调用（跨轮拼接，与渲染层一条 aiMsg 的合并语义一致）
+    if (textBuf) finalText += textBuf
+    for (const [, e] of toolCallAccumulator) allToolCalls.push({ name: e.name, args: e.args })
+
     // 没有工具调用 → 本轮就是最终答，结束
-    if (toolCallAccumulator.size === 0) return
+    if (toolCallAccumulator.size === 0) {
+      return { finalText, toolCalls: allToolCalls }
+    }
 
     // 执行每个工具调用，结果作为 role:'tool' 回灌
     for (const [, entry] of toolCallAccumulator) {
@@ -168,5 +181,16 @@ export async function chatWithProvider(opts: RunOptions): Promise<void> {
   }
 
   // 达到上限仍没结束：补一句收尾，引导模型基于已有结果给答复
-  onToken('\n\n_（已达到本轮工具调用上限，请基于已获取的信息继续回答）_')
+  const capNote = '\n\n_（已达到本轮工具调用上限，请基于已获取的信息继续回答）_'
+  onToken(capNote)
+  finalText += capNote
+  return { finalText, toolCalls: allToolCalls }
+}
+
+/** chatWithProvider 的返回值：本轮要落库的合并后信息（与渲染层一条 aiMsg 对齐）。 */
+export interface ChatResult {
+  /** 所有轮 assistant 文本拼接（= 渲染层 aiMsg.content）。 */
+  finalText: string
+  /** 所有轮的工具调用（= 渲染层 aiMsg.toolCalls）。 */
+  toolCalls: { name: string; args: string }[]
 }

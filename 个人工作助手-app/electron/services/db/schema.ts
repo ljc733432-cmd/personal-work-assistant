@@ -6,7 +6,8 @@ import { integer, sqliteTable, text } from 'drizzle-orm/sqlite-core'
  * M1：providers + settings
  * M5：work_dirs（工作目录白名单）+ search_providers（联网搜索配置）
  * M3：tasks（任务，含 M4/M6 预留字段）
- * M2/M4/M6 会追加 conversations / messages 等（见 PRD §4.2）。
+ * M2：conversations + messages（对话历史持久化）
+ * M4/M6 会继续在已有表上追加字段（见 PRD §4.2）。
  */
 
 // ---------- Provider：模型配置 ----------
@@ -106,3 +107,44 @@ export const tasks = sqliteTable('tasks', {
 
 export type TaskRow = typeof tasks.$inferSelect
 export type TaskInsert = typeof tasks.$inferInsert
+
+// ---------- Conversation：会话（M2 对话历史持久化） ----------
+// 见 PRD §4.2、CONTEXT.md「Conversation」「Message」。
+// type：normal 普通会话 / followup 跟进会话（M6 用，本轮默认 normal）。
+// pinned：置顶（M2 UI 预留，默认 0）。
+// defaultProviderId：会话级默认模型（可空，null=用全局首个启用 Provider）。
+export const conversations = sqliteTable('conversations', {
+  id: text('id').primaryKey(),
+  title: text('title').notNull(), // 自动用首条 user 消息生成，可改
+  type: text('type', { enum: ['normal', 'followup'] }).notNull().default('normal'),
+  scenarioId: text('scenario_id'), // M6 跟进场景，可空
+  defaultProviderId: text('default_provider_id'), // 会话级默认 Provider，可空
+  pinned: integer('pinned', { mode: 'boolean' }).notNull().default(false),
+  createdAt: integer('created_at', { mode: 'number' })
+    .notNull()
+    .default(sql`(unixepoch())`),
+  updatedAt: integer('updated_at', { mode: 'number' })
+    .notNull()
+    .default(sql`(unixepoch())`),
+})
+
+// ---------- Message：消息（M2） ----------
+// 消息不可改（PRD 只列 createdAt，无 updatedAt）。
+// toolCalls / attachments 用 text+json 模式存（Drizzle 自动 stringify/parse）。
+export const messages = sqliteTable('messages', {
+  id: text('id').primaryKey(),
+  conversationId: text('conversation_id').notNull(),
+  role: text('role', { enum: ['system', 'user', 'assistant', 'tool'] }).notNull(),
+  content: text('content').notNull().default(''), // assistant 流式中间态可能为空字符串
+  providerId: text('provider_id'), // 逐条记录用哪个模型（会话内切模型，可空）
+  toolCalls: text('tool_calls', { mode: 'json' }), // FC 调用记录，可空
+  attachments: text('attachments', { mode: 'json' }), // 预留，可空
+  createdAt: integer('created_at', { mode: 'number' })
+    .notNull()
+    .default(sql`(unixepoch())`),
+})
+
+export type ConversationRow = typeof conversations.$inferSelect
+export type ConversationInsert = typeof conversations.$inferInsert
+export type MessageRow = typeof messages.$inferSelect
+export type MessageInsert = typeof messages.$inferInsert

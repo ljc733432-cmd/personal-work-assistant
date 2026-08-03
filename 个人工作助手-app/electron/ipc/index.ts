@@ -3,7 +3,15 @@ import { randomUUID } from 'node:crypto'
 import path from 'node:path'
 import { eq } from 'drizzle-orm'
 import { getDb, dbHealthCheck } from '../services/db'
-import { providers, settings, workDirs, searchProviders, tasks } from '../services/db/schema'
+import {
+  providers,
+  settings,
+  workDirs,
+  searchProviders,
+  tasks,
+  conversations,
+  messages,
+} from '../services/db/schema'
 import { setSecret, getSecret, deleteSecret } from '../services/secret'
 import {
   listProviders,
@@ -12,9 +20,14 @@ import {
   listAllWorkDirs,
   listTasks,
 } from '../services/providers/factory'
+import {
+  listConversations,
+  getConversation,
+  listMessages,
+} from '../services/conversation/factory'
 import { listSearchProviders, getActiveSearchConfig } from '../services/search/factory'
 import { pingTavily } from '../services/searchTools'
-import { chatWithProvider } from '../services/providers/chat'
+import { chatWithProvider, type ChatResult } from '../services/providers/chat'
 import { assembleTools, type ToolContext } from '../services/tools'
 import { getSystemDirs, type AccessibleDir } from '../services/systemDirs'
 import { PROVIDER_PRESETS } from '../services/providers/types'
@@ -30,6 +43,11 @@ import type {
   SearchProvider,
   Task,
   TaskInput,
+  Conversation,
+  ConversationInput,
+  ConversationMessage,
+  MessageInsertInput,
+  MessageToolCall,
 } from '../types'
 
 /**
@@ -48,6 +66,77 @@ function ok<T>(data: T): IpcResult<T> {
 }
 function err(error: string): IpcResult<never> {
   return { ok: false, error }
+}
+
+/**
+ * M2：把本轮对话落库（user 消息 + assistant 最终消息）。
+ *
+ * 落库策略（与渲染层合并式语义对齐，见 ChatPage）：
+ *  - params.messages 是完整历史，但只有最后一条 user 是本轮新增，
+ *    其余消息已在之前轮次落库 → 这里只落「最后一条 user」。
+ *  - assistant 只落一条：chatWithProvider 返回的合并 finalText + toolCalls。
+ *    中间 tool 结果消息（chat.ts working 数组里的 role:'tool'）不落库
+ *    （渲染层从不显示，历史回放也不需要）。
+ *  - 会话标题：首次有消息（title 仍是默认「新会话」）时用 user 文本回填。
+ *
+ * 失败不抛：调用方已用 try 包住，落库失败不影响本轮已流式推给前端的回复。
+ */
+function persistTurn(
+  conversationId: string,
+  providerId: string,
+  history: ChatSendParams['messages'],
+  result: ChatResult,
+): void {
+  const db = getDb()
+  // 校验会话存在（防御：渲染层传错 id 时静默跳过，避免外键悬空）
+  const conv = db.select().from(conversations).where(eq(conversations.id, conversationId)).get()
+  if (!conv) throw new Error(`会话不存在: ${conversationId}`)
+
+  // 找本轮新增的 user 消息（最后一条 user）
+  let lastUser: { role: 'user'; content: string } | null = null
+  for (let i = history.length - 1; i >= 0; i--) {
+    if (history[i].role === 'user') {
+      lastUser = { role: 'user', content: history[i].content }
+      break
+    }
+  }
+
+  const now = Math.floor(Date.now() / 1000)
+
+  // 1) 落 user 消息
+  if (lastUser) {
+    db.insert(messages)
+      .values({
+        id: randomUUID(),
+        conversationId,
+        role: 'user',
+        content: lastUser.content,
+      })
+      .run()
+
+    // 2) 首次消息回填标题（仅当 title 还是默认占位）
+    if (conv.title === '新会话') {
+      const title = lastUser.content.slice(0, 30).trim() || '新会话'
+      db.update(conversations).set({ title, updatedAt: now }).where(eq(conversations.id, conversationId)).run()
+    }
+  }
+
+  // 3) 落 assistant 最终消息（content 可能为空——纯工具调用轮；仍落一条以保留 toolCalls 记录）
+  const toolCalls: MessageToolCall[] | null =
+    result.toolCalls.length > 0 ? result.toolCalls : null
+  db.insert(messages)
+    .values({
+      id: randomUUID(),
+      conversationId,
+      role: 'assistant',
+      content: result.finalText,
+      providerId,
+      toolCalls,
+    })
+    .run()
+
+  // 4) 刷新会话 updatedAt（侧栏排序）
+  db.update(conversations).set({ updatedAt: now }).where(eq(conversations.id, conversationId)).run()
 }
 
 function rowToProvider(row: typeof providers.$inferSelect): Provider {
@@ -370,7 +459,7 @@ function registerChatHandlers() {
         })
       }
 
-      await chatWithProvider({
+      const result = await chatWithProvider({
         client,
         model,
         messages: params.messages,
@@ -381,6 +470,14 @@ function registerChatHandlers() {
         onConfirm,
         signal: ac.signal,
       })
+
+      // M2 落库：user + assistant 最终消息（与渲染层合并语义对齐，中间 tool 结果不落库）。
+      // 用 try 包住：落库失败不应让对话本身失败（已生成的内容已通过流式推给前端）。
+      try {
+        await persistTurn(params.conversationId, params.providerId, params.messages, result)
+      } catch (persistErr) {
+        logInfo('[chat] 落库失败（不影响本轮回复）:', String(persistErr))
+      }
 
       win.webContents.send('chat:done', { reqId })
       abortMap.delete(reqId)
@@ -543,6 +640,138 @@ function registerDbHandlers() {
   })
 }
 
+// ---------- Conversation / Message CRUD（M2，照搬 task 模式） ----------
+function rowToConversation(row: typeof conversations.$inferSelect): Conversation {
+  return {
+    id: row.id,
+    title: row.title,
+    type: row.type,
+    scenarioId: row.scenarioId,
+    defaultProviderId: row.defaultProviderId,
+    pinned: row.pinned,
+    createdAt: row.createdAt,
+    updatedAt: row.updatedAt,
+  }
+}
+
+function rowToMessage(row: typeof messages.$inferSelect): ConversationMessage {
+  return {
+    id: row.id,
+    conversationId: row.conversationId,
+    role: row.role,
+    content: row.content,
+    providerId: row.providerId,
+    toolCalls: (row.toolCalls ?? null) as ConversationMessage['toolCalls'],
+    attachments: (row.attachments ?? null) as ConversationMessage['attachments'],
+    createdAt: row.createdAt,
+  }
+}
+
+function registerConversationHandlers() {
+  // 列出全部会话（侧栏用）
+  ipcMain.handle('conversation:list', (): IpcResult<Conversation[]> => {
+    try {
+      return ok(listConversations())
+    } catch (e) {
+      return err(String(e))
+    }
+  })
+
+  // 新建会话。title 可空（首次创建），由后续首条消息或 rename 回填。
+  ipcMain.handle('conversation:create', (_, input: ConversationInput): IpcResult<Conversation> => {
+    try {
+      const db = getDb()
+      const id = input.id ?? randomUUID()
+      const title = input.title?.trim() || '新会话'
+      db.insert(conversations)
+        .values({
+          id,
+          title,
+          type: input.type ?? 'normal',
+          defaultProviderId: input.defaultProviderId ?? null,
+          pinned: input.pinned ?? false,
+        })
+        .run()
+      const row = db.select().from(conversations).where(eq(conversations.id, id)).get()!
+      return ok(rowToConversation(row))
+    } catch (e) {
+      return err(String(e))
+    }
+  })
+
+  // 重命名（同时刷新 updatedAt，让会话在侧栏排序前移）
+  ipcMain.handle(
+    'conversation:rename',
+    (_, id: string, title: string): IpcResult<Conversation> => {
+      try {
+        const db = getDb()
+        const now = Math.floor(Date.now() / 1000)
+        db.update(conversations)
+          .set({ title: title.trim() || '新会话', updatedAt: now })
+          .where(eq(conversations.id, id))
+          .run()
+        const row = db.select().from(conversations).where(eq(conversations.id, id)).get()
+        if (!row) return err('会话不存在')
+        return ok(rowToConversation(row))
+      } catch (e) {
+        return err(String(e))
+      }
+    },
+  )
+
+  // 删除会话 + 级联删消息（SQLite foreign_keys=ON 但未声明外键约束，手动删更稳）
+  ipcMain.handle('conversation:delete', (_, id: string): IpcResult<true> => {
+    try {
+      const db = getDb()
+      db.delete(messages).where(eq(messages.conversationId, id)).run()
+      db.delete(conversations).where(eq(conversations.id, id)).run()
+      return ok(true)
+    } catch (e) {
+      return err(String(e))
+    }
+  })
+
+  // 列出某会话全部消息（历史 hydrate 用）
+  ipcMain.handle(
+    'message:list',
+    (_, conversationId: string): IpcResult<ConversationMessage[]> => {
+      try {
+        return ok(listMessages(conversationId))
+      } catch (e) {
+        return err(String(e))
+      }
+    },
+  )
+
+  // 写单条消息（供 chat:send 落库 + 未来 M4 抽取回灌用）。
+  // 注意：流式 token 不逐条写库，由 chat:send 在 done 前用此接口一次性落 assistant 最终文本。
+  ipcMain.handle('message:insert', (_, input: MessageInsertInput): IpcResult<ConversationMessage> => {
+    try {
+      const db = getDb()
+      const id = input.id ?? randomUUID()
+      db.insert(messages)
+        .values({
+          id,
+          conversationId: input.conversationId,
+          role: input.role,
+          content: input.content,
+          providerId: input.providerId ?? null,
+          toolCalls: input.toolCalls ?? null,
+        })
+        .run()
+      // 写消息后顺手刷新会话 updatedAt（侧栏排序）
+      db.update(conversations)
+        .set({ updatedAt: Math.floor(Date.now() / 1000) })
+        .where(eq(conversations.id, input.conversationId))
+        .run()
+      const row = db.select().from(messages).where(eq(messages.id, id)).get()!
+      return ok(rowToMessage(row))
+    } catch (e) {
+      return err(String(e))
+    }
+  })
+}
+
 /** 暴露 Provider 预设给渲染层（设置页用）。 */
 function registerMetaHandlers() {
   ipcMain.handle('meta:provider-presets', () => ok(PROVIDER_PRESETS))
@@ -555,6 +784,7 @@ export function registerIpcHandlers() {
   registerChatHandlers()
   registerWorkDirHandlers()
   registerTaskHandlers()
+  registerConversationHandlers()
   registerDbHandlers()
   registerMetaHandlers()
   logInfo('[ipc] handlers registered')

@@ -6,10 +6,20 @@ import { Markdown } from '@/components/Markdown'
 import { ConfirmDialog } from '@/components/ui/dialog'
 import { useProvidersStore } from '@/stores/providers'
 import { invoke, on, send } from '@/lib/ipc'
-import type { ChatMessage, ConfirmRequest } from '@/types'
+import type { ChatMessage, ConfirmRequest, Conversation, ConversationMessage } from '@/types'
 
 let _seq = 0
 const genId = () => `m${Date.now()}_${_seq++}`
+
+/** DB 持久化消息 → 组件内存消息（M2-Step3 hydrate 用）。 */
+function dbMsgToChatMessage(m: ConversationMessage): ChatMessage {
+  return {
+    id: m.id, // 复用 DB 的 id，避免 hydrate 后再发消息时 id 冲突
+    role: m.role,
+    content: m.content,
+    toolCalls: m.toolCalls ?? undefined,
+  }
+}
 
 export function ChatPage() {
   const { providers, refresh } = useProvidersStore()
@@ -21,11 +31,43 @@ export function ChatPage() {
   const [error, setError] = useState<string | null>(null)
   const [firstTokenMs, setFirstTokenMs] = useState<number | null>(null)
   const [confirmReq, setConfirmReq] = useState<ConfirmRequest | null>(null)
+  // M2-Step2 临时：单会话兜底（取第一个，没有就创建）。
+  // 多会话列表与切换是 Step5；这里先保证 conversationId 能传给主进程落库。
+  const [conversation, setConversation] = useState<Conversation | null>(null)
   const scrollRef = useRef<HTMLDivElement>(null)
 
   useEffect(() => {
     refresh()
   }, [refresh])
+
+  // M2-Step3：会话初始化（单会话兜底）+ 历史 hydrate。
+  // 多会话列表与切换是 Step5；这里先保证：重开应用能看到该会话的历史消息。
+  useEffect(() => {
+    let cancelled = false
+    ;(async () => {
+      try {
+        const list = await invoke<Conversation[]>('conversation:list')
+        let conv: Conversation | null = list[0] ?? null
+        if (!conv) {
+          conv = await invoke<Conversation>('conversation:create', {})
+        }
+        if (cancelled || !conv) return
+        setConversation(conv)
+        // hydrate 历史消息：DB 的 ConversationMessage → 组件 ChatMessage
+        const msgs = await invoke<ConversationMessage[]>('message:list', conv.id)
+        if (cancelled) return
+        if (msgs.length > 0) {
+          setMessages(msgs.map(dbMsgToChatMessage))
+        }
+      } catch (e) {
+        // 会话初始化失败不阻塞对话（主进程会兜底：conversationId 为空时落库跳过）
+        console.error('[chat] 会话初始化失败', e)
+      }
+    })()
+    return () => {
+      cancelled = true
+    }
+  }, [])
 
   // 监听工具确认请求（write_file 覆盖等）—— 全局，整个组件生命周期
   useEffect(() => {
@@ -56,9 +98,27 @@ export function ChatPage() {
   }, [messages])
 
   const currentReqId = useRef<string | null>(null)
+  // 持有当前活跃流的 cleanup 函数（handleSend 设置，卸载时调用，防 listener 泄漏）
+  const activeCleanup = useRef<(() => void) | null>(null)
+
+  // M2-Step3：组件卸载时若仍在流式，取消请求 + 退订监听，防 IPC listener 泄漏 + setState 到已卸载组件。
+  // （ChatPage 在 App.tsx 是条件渲染，切 tab 即卸载。）
+  useEffect(() => {
+    return () => {
+      if (currentReqId.current) {
+        send('chat:cancel', currentReqId.current)
+      }
+      activeCleanup.current?.()
+      activeCleanup.current = null
+    }
+  }, [])
 
   const handleSend = async () => {
     if (!input.trim() || !providerId || streaming) return
+    if (!conversation) {
+      setError('会话未就绪，请稍候')
+      return
+    }
     setError(null)
 
     const userMsg: ChatMessage = { id: genId(), role: 'user', content: input.trim() }
@@ -98,8 +158,11 @@ export function ChatPage() {
       )
     })
     const offDone = on('chat:done', (...args) => {
-      const ev = args[0] as { reqId: string }
+      const ev = args[0] as { reqId: string; cancelled?: boolean }
       if (ev.reqId !== reqId) return
+      // 修现存 bug：done 时必须清掉 aiMsg.streaming，否则光标动画一直闪。
+      // cancelled=true（用户点取消）也走这里，content 保留已生成的部分。
+      setMessages((cur) => cur.map((m) => (m.id === aiMsg.id ? { ...m, streaming: false } : m)))
       cleanup()
     })
     const offError = on('chat:error', (...args) => {
@@ -117,15 +180,18 @@ export function ChatPage() {
       offDone()
       offError()
       currentReqId.current = null
+      activeCleanup.current = null
       setStreaming(false)
       setFirstTokenMs(null)
     }
+    activeCleanup.current = cleanup
 
     try {
       await invoke<string>('chat:send', {
         reqId,
         providerId,
         enableTools,
+        conversationId: conversation.id,
         messages: history.map((m) => ({ role: m.role, content: m.content })),
       })
     } catch (e) {
