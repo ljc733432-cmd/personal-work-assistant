@@ -2,8 +2,9 @@ import { useState } from 'react'
 import { cn } from '@/lib/utils'
 import { ChatPage } from '@/pages/chat/ChatPage'
 import { SettingsPage } from '@/pages/settings/SettingsPage'
+import { TasksPage } from '@/pages/tasks/TasksPage'
 
-type Tab = 'chat' | 'settings'
+type Tab = 'chat' | 'tasks' | 'settings'
 
 function App() {
   const [tab, setTab] = useState<Tab>('chat')
@@ -17,6 +18,12 @@ function App() {
             <path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z" />
           </svg>
         </NavBtn>
+        <NavBtn active={tab === 'tasks'} onClick={() => setTab('tasks')} label="任务">
+          <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+            <path d="M9 11l3 3L22 4" />
+            <path d="M21 12v7a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11" />
+          </svg>
+        </NavBtn>
         <NavBtn active={tab === 'settings'} onClick={() => setTab('settings')} label="设置">
           <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
             <circle cx="12" cy="12" r="3" />
@@ -24,14 +31,13 @@ function App() {
           </svg>
         </NavBtn>
         <div className="mt-auto px-2 text-center text-[10px] leading-tight text-muted-foreground">
-          <div>M1</div>
-          <div>骨架</div>
+          <div>v0.1</div>
         </div>
       </nav>
 
       {/* 主区 */}
       <main className="flex-1 overflow-hidden">
-        {tab === 'chat' ? <ChatPage /> : <SettingsPage />}
+        {tab === 'chat' ? <ChatPage /> : tab === 'tasks' ? <TasksPage /> : <SettingsPage />}
       </main>
     </div>
   )

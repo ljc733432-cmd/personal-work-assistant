@@ -29,6 +29,9 @@ const ALLOWED_INVOKE = [
   'search-provider:upsert', // 新增/更新搜索 Provider
   'search-provider:delete', // 删除搜索 Provider
   'search-provider:test',   // 测试搜索连接（发最小 query）
+  'task:list',              // 列任务（M3）
+  'task:upsert',            // 新增/更新任务
+  'task:delete',            // 删除任务
 ] as const
 
 const ALLOWED_SEND = [

@@ -1,9 +1,9 @@
 import OpenAI from 'openai'
-import { eq } from 'drizzle-orm'
+import { eq, desc } from 'drizzle-orm'
 import { getDb } from '../db'
-import { providers, workDirs } from '../db/schema'
+import { providers, workDirs, tasks } from '../db/schema'
 import { getSecret } from '../secret'
-import type { Provider, WorkDir } from '../../types'
+import type { Provider, WorkDir, Task } from '../../types'
 
 /**
  * Provider 加载 + OpenAI client 工厂。
@@ -102,6 +102,30 @@ export function listAllWorkDirs(): WorkDir[] {
       path: r.path,
       mode: r.mode,
       enabled: r.enabled,
+      createdAt: r.createdAt,
+      updatedAt: r.updatedAt,
+    }))
+}
+
+// ---------- Task CRUD（只读放这里，写操作在 ipc） ----------
+
+/** 列出全部 Task（任务页用）。按更新时间倒序（最近改的在前）。 */
+export function listTasks(): Task[] {
+  return getDb()
+    .select()
+    .from(tasks)
+    .orderBy(desc(tasks.updatedAt))
+    .all()
+    .map((r) => ({
+      id: r.id,
+      title: r.title,
+      description: r.description,
+      status: r.status,
+      priority: r.priority,
+      dueDate: r.dueDate,
+      source: r.source,
+      sourceConversationId: r.sourceConversationId,
+      followupLog: r.followupLog,
       createdAt: r.createdAt,
       updatedAt: r.updatedAt,
     }))

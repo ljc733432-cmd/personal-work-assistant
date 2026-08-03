@@ -5,7 +5,8 @@ import { integer, sqliteTable, text } from 'drizzle-orm/sqlite-core'
  * Drizzle schema（SQLite）。
  * M1：providers + settings
  * M5：work_dirs（工作目录白名单）+ search_providers（联网搜索配置）
- * M2~M6 会追加 conversations / messages / tasks 等（见 PRD §4.2）。
+ * M3：tasks（任务，含 M4/M6 预留字段）
+ * M2/M4/M6 会追加 conversations / messages 等（见 PRD §4.2）。
  */
 
 // ---------- Provider：模型配置 ----------
@@ -77,3 +78,31 @@ export const searchProviders = sqliteTable('search_providers', {
 
 export type SearchProviderRow = typeof searchProviders.$inferSelect
 export type SearchProviderInsert = typeof searchProviders.$inferInsert
+
+// ---------- Task：任务（M3，含 M4/M6 预留字段） ----------
+// 见 PRD §4.2、CONTEXT.md「Task」。
+// status：todo/in_progress/done；priority：low/medium/high；source：manual/from_chat。
+// 预留字段（本轮 UI 不暴露，M4/M6 用）：
+//  - source/sourceConversationId：M4 AI 抽取任务溯源
+//  - followupLog：M6 跟进日志追加
+//  - remindTimes 留到 M6 再加（避免现在过度设计）
+export const tasks = sqliteTable('tasks', {
+  id: text('id').primaryKey(),
+  title: text('title').notNull(),
+  description: text('description'), // 可空
+  status: text('status', { enum: ['todo', 'in_progress', 'done'] }).notNull().default('todo'),
+  priority: text('priority', { enum: ['low', 'medium', 'high'] }).notNull().default('medium'),
+  dueDate: integer('due_date', { mode: 'number' }), // Unix 秒，可空，null=无截止
+  source: text('source', { enum: ['manual', 'from_chat'] }).notNull().default('manual'),
+  sourceConversationId: text('source_conversation_id'), // M4 溯源用，可空
+  followupLog: text('followup_log'), // M6 跟进日志，可空
+  createdAt: integer('created_at', { mode: 'number' })
+    .notNull()
+    .default(sql`(unixepoch())`),
+  updatedAt: integer('updated_at', { mode: 'number' })
+    .notNull()
+    .default(sql`(unixepoch())`),
+})
+
+export type TaskRow = typeof tasks.$inferSelect
+export type TaskInsert = typeof tasks.$inferInsert

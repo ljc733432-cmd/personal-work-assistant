@@ -65,6 +65,20 @@ CREATE TABLE IF NOT EXISTS search_providers (
   created_at   INTEGER NOT NULL DEFAULT (unixepoch()),
   updated_at   INTEGER NOT NULL DEFAULT (unixepoch())
 );
+
+CREATE TABLE IF NOT EXISTS tasks (
+  id                       TEXT PRIMARY KEY,
+  title                    TEXT NOT NULL,
+  description              TEXT,
+  status                   TEXT NOT NULL DEFAULT 'todo',
+  priority                 TEXT NOT NULL DEFAULT 'medium',
+  due_date                 INTEGER,
+  source                   TEXT NOT NULL DEFAULT 'manual',
+  source_conversation_id   TEXT,
+  followup_log             TEXT,
+  created_at               INTEGER NOT NULL DEFAULT (unixepoch()),
+  updated_at               INTEGER NOT NULL DEFAULT (unixepoch())
+);
 `
 
 export function getDb(): BetterSQLite3Database<typeof schema> {

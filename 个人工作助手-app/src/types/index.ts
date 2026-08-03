@@ -89,6 +89,34 @@ export interface SearchProviderInput {
   enabled: boolean
 }
 
+// ---------- Task：任务（M3） ----------
+export type TaskStatus = 'todo' | 'in_progress' | 'done'
+export type TaskPriority = 'low' | 'medium' | 'high'
+export type TaskSource = 'manual' | 'from_chat'
+
+export interface Task {
+  id: string
+  title: string
+  description: string | null
+  status: TaskStatus
+  priority: TaskPriority
+  dueDate: number | null
+  source: TaskSource
+  sourceConversationId: string | null
+  followupLog: string | null
+  createdAt: number
+  updatedAt: number
+}
+
+export interface TaskInput {
+  id?: string
+  title: string
+  description?: string | null
+  status?: TaskStatus
+  priority?: TaskPriority
+  dueDate?: number | null
+}
+
 // ---------- 工具确认请求（write_file 覆盖等） ----------
 export interface ConfirmRequest {
   reqId: string

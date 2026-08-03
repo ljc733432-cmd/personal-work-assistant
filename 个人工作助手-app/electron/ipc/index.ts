@@ -3,13 +3,14 @@ import { randomUUID } from 'node:crypto'
 import path from 'node:path'
 import { eq } from 'drizzle-orm'
 import { getDb, dbHealthCheck } from '../services/db'
-import { providers, settings, workDirs, searchProviders } from '../services/db/schema'
+import { providers, settings, workDirs, searchProviders, tasks } from '../services/db/schema'
 import { setSecret, getSecret, deleteSecret } from '../services/secret'
 import {
   listProviders,
   createClientForProvider,
   listEnabledWorkDirs,
   listAllWorkDirs,
+  listTasks,
 } from '../services/providers/factory'
 import { listSearchProviders, getActiveSearchConfig } from '../services/search/factory'
 import { pingTavily } from '../services/searchTools'
@@ -27,6 +28,8 @@ import type {
   WorkDirInput,
   SearchProviderInput,
   SearchProvider,
+  Task,
+  TaskInput,
 } from '../types'
 
 /**
@@ -457,6 +460,83 @@ function registerWorkDirHandlers() {
   })
 }
 
+// ---------- Task CRUD（M3，照搬 workdir 模式） ----------
+function rowToTask(row: typeof tasks.$inferSelect): Task {
+  return {
+    id: row.id,
+    title: row.title,
+    description: row.description,
+    status: row.status,
+    priority: row.priority,
+    dueDate: row.dueDate,
+    source: row.source,
+    sourceConversationId: row.sourceConversationId,
+    followupLog: row.followupLog,
+    createdAt: row.createdAt,
+    updatedAt: row.updatedAt,
+  }
+}
+
+function registerTaskHandlers() {
+  ipcMain.handle('task:list', (): IpcResult<Task[]> => {
+    try {
+      return ok(listTasks())
+    } catch (e) {
+      return err(String(e))
+    }
+  })
+
+  ipcMain.handle('task:upsert', (_, input: TaskInput): IpcResult<Task> => {
+    try {
+      const db = getDb()
+      const id = input.id ?? randomUUID()
+      const now = Math.floor(Date.now() / 1000)
+      const existing = db.select().from(tasks).where(eq(tasks.id, id)).get()
+
+      if (existing) {
+        // 更新（不改 source/sourceConversationId/followupLog，这些由服务端控制）
+        db.update(tasks)
+          .set({
+            title: input.title,
+            description: input.description ?? null,
+            status: input.status ?? existing.status,
+            priority: input.priority ?? existing.priority,
+            dueDate: input.dueDate ?? null,
+            updatedAt: now,
+          })
+          .where(eq(tasks.id, id))
+          .run()
+      } else {
+        // 新增：M3 手动建，source 默认 manual
+        db.insert(tasks)
+          .values({
+            id,
+            title: input.title,
+            description: input.description ?? null,
+            status: input.status ?? 'todo',
+            priority: input.priority ?? 'medium',
+            dueDate: input.dueDate ?? null,
+            source: 'manual',
+          })
+          .run()
+      }
+      const row = db.select().from(tasks).where(eq(tasks.id, id)).get()!
+      return ok(rowToTask(row))
+    } catch (e) {
+      return err(String(e))
+    }
+  })
+
+  ipcMain.handle('task:delete', (_, id: string): IpcResult<true> => {
+    try {
+      getDb().delete(tasks).where(eq(tasks.id, id)).run()
+      return ok(true)
+    } catch (e) {
+      return err(String(e))
+    }
+  })
+}
+
 function registerDbHandlers() {
   ipcMain.handle('db:health', (): IpcResult<{ ok: boolean; dbPath: string; detail: string }> => {
     return ok(dbHealthCheck())
@@ -474,6 +554,7 @@ export function registerIpcHandlers() {
   registerSearchProviderHandlers()
   registerChatHandlers()
   registerWorkDirHandlers()
+  registerTaskHandlers()
   registerDbHandlers()
   registerMetaHandlers()
   logInfo('[ipc] handlers registered')
