@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from 'react'
 import { Button } from '@/components/ui/button'
 import { Textarea } from '@/components/ui/textarea'
 import { Card } from '@/components/ui/card'
+import { Markdown } from '@/components/Markdown'
 import { useProvidersStore } from '@/stores/providers'
 import { invoke, on, send } from '@/lib/ipc'
 import type { ChatMessage } from '@/types'
@@ -70,10 +71,11 @@ export function ChatPage() {
     const offToolCall = on('chat:tool_call', (...args) => {
       const ev = args[0] as { reqId: string; name: string; args: string }
       if (ev.reqId !== reqId) return
+      // 工具调用独立展示，不污染正文 content
       setMessages((cur) =>
         cur.map((m) =>
           m.id === aiMsg.id
-            ? { ...m, content: m.content + `\n\n⚙️ 调用工具 ${ev.name}(${ev.args})\n\n` }
+            ? { ...m, toolCalls: [...(m.toolCalls ?? []), { name: ev.name, args: ev.args }] }
             : m,
         ),
       )
@@ -164,12 +166,20 @@ export function ChatPage() {
 
       {/* 消息区 */}
       <div ref={scrollRef} className="flex-1 overflow-y-auto px-4 py-6">
-        <div className="mx-auto max-w-3xl space-y-4">
+        <div className="mx-auto max-w-3xl space-y-5">
           {messages.length === 0 && (
-            <div className="rounded-lg border border-dashed bg-card/50 p-8 text-center text-sm text-muted-foreground">
-              <p className="mb-2 font-medium text-foreground">M1 骨架验证</p>
-              <p>试试问"现在几点？"来验证 Function Calling 链路。</p>
-              <p className="mt-1">需先在「设置」页配置一个模型 Provider。</p>
+            <div className="mt-12 space-y-3 text-center">
+              <div className="mx-auto flex h-14 w-14 items-center justify-center rounded-2xl bg-primary/10 text-2xl">
+                💬
+              </div>
+              <div>
+                <p className="text-base font-medium text-foreground">开始对话</p>
+                <p className="mt-1 text-sm text-muted-foreground">
+                  {providerId
+                    ? '问点什么吧。试试「现在几点？」来体验工具调用。'
+                    : '请先到「设置」页配置一个模型 Provider。'}
+                </p>
+              </div>
             </div>
           )}
           {messages.map((m) => (
@@ -211,18 +221,62 @@ export function ChatPage() {
 
 function MessageBubble({ msg }: { msg: ChatMessage }) {
   const isUser = msg.role === 'user'
+  const hasContent = msg.content.trim().length > 0
+  const hasTools = (msg.toolCalls?.length ?? 0) > 0
+
   return (
-    <div className={`flex ${isUser ? 'justify-end' : 'justify-start'}`}>
-      <Card
-        className={`max-w-[85%] px-4 py-2.5 ${
-          isUser ? 'bg-primary text-primary-foreground' : 'bg-card'
-        } ${msg.streaming ? 'animate-pulse' : ''}`}
+    <div className={`flex gap-2.5 ${isUser ? 'flex-row-reverse' : 'flex-row'}`}>
+      {/* 头像 */}
+      <div
+        className={`mt-0.5 flex h-7 w-7 flex-shrink-0 items-center justify-center rounded-full text-xs font-medium ${
+          isUser ? 'bg-primary text-primary-foreground' : 'bg-muted text-muted-foreground'
+        }`}
       >
-        <div className="whitespace-pre-wrap break-words text-sm leading-relaxed">
-          {msg.content || (msg.streaming ? '…' : '')}
-          {msg.streaming && <span className="ml-0.5 animate-pulse">▋</span>}
-        </div>
-      </Card>
+        {isUser ? '我' : 'AI'}
+      </div>
+
+      {/* 内容区 */}
+      <div className={`flex max-w-[80%] flex-col gap-1.5 ${isUser ? 'items-end' : 'items-start'}`}>
+        {/* 工具调用徽章（在正文上方） */}
+        {hasTools &&
+          msg.toolCalls!.map((tc, i) => (
+            <div
+              key={i}
+              className="inline-flex items-center gap-1.5 rounded-md border border-amber-200 bg-amber-50 px-2.5 py-1 text-xs text-amber-700"
+            >
+              <span>⚙️</span>
+              <span className="font-medium">{tc.name}</span>
+              {tc.args && tc.args !== '{}' && (
+                <span className="font-mono text-[10px] text-amber-600/80">{tc.args}</span>
+              )}
+            </div>
+          ))}
+
+        {/* 消息气泡 */}
+        {(hasContent || msg.streaming) && (
+          <Card
+            className={`px-3.5 py-2.5 ${
+              isUser
+                ? 'rounded-br-sm bg-primary text-primary-foreground'
+                : 'rounded-bl-sm bg-card'
+            }`}
+          >
+            {hasContent ? (
+              isUser ? (
+                // 用户消息也用 Markdown（支持它发代码/列表）
+                <Markdown content={msg.content} />
+              ) : (
+                <Markdown content={msg.content} />
+              )
+            ) : (
+              <span className="text-sm text-muted-foreground">…</span>
+            )}
+            {msg.streaming && (
+              <span className="ml-0.5 inline-block h-3.5 w-1.5 animate-pulse bg-current align-text-bottom" />
+            )}
+          </Card>
+        )}
+      </div>
     </div>
   )
 }

@@ -47,6 +47,77 @@
   --radius: var(--radius);
 }
 
+/* highlight.js 暗色主题（代码块） */
+@import 'highlight.js/styles/github-dark.css';
+
+/* ===== 消息 Markdown 排版（prose 简化版） ===== */
+.msg-markdown {
+  font-size: 0.875rem;
+  line-height: 1.7;
+  word-break: break-word;
+}
+.msg-markdown > *:first-child { margin-top: 0; }
+.msg-markdown > *:last-child { margin-bottom: 0; }
+.msg-markdown p { margin: 0.5em 0; }
+.msg-markdown h1, .msg-markdown h2, .msg-markdown h3, .msg-markdown h4 {
+  margin: 0.8em 0 0.4em;
+  font-weight: 600;
+  line-height: 1.3;
+}
+.msg-markdown h1 { font-size: 1.3em; }
+.msg-markdown h2 { font-size: 1.15em; }
+.msg-markdown h3 { font-size: 1.05em; }
+.msg-markdown ul, .msg-markdown ol { margin: 0.5em 0; padding-left: 1.4em; }
+.msg-markdown li { margin: 0.2em 0; }
+.msg-markdown ul { list-style: disc; }
+.msg-markdown ol { list-style: decimal; }
+.msg-markdown blockquote {
+  margin: 0.6em 0;
+  padding: 0.2em 0.9em;
+  border-left: 3px solid hsl(var(--border));
+  color: hsl(var(--muted-foreground));
+}
+.msg-markdown a { color: hsl(var(--primary)); text-decoration: underline; }
+.msg-markdown code {
+  font-family: ui-monospace, "SF Mono", Menlo, Consolas, monospace;
+  font-size: 0.85em;
+}
+/* 行内 code */
+.msg-markdown :not(pre) > code {
+  padding: 0.15em 0.4em;
+  border-radius: 4px;
+  background: hsl(var(--muted));
+}
+/* 代码块 */
+.msg-markdown pre {
+  margin: 0.7em 0;
+  padding: 0.9em 1em;
+  border-radius: 8px;
+  overflow-x: auto;
+  background: #0d1117 !important;
+}
+.msg-markdown pre code {
+  background: transparent;
+  padding: 0;
+  font-size: 0.82em;
+  line-height: 1.5;
+}
+/* 表格 */
+.msg-markdown table {
+  margin: 0.7em 0;
+  border-collapse: collapse;
+  width: 100%;
+  font-size: 0.85em;
+}
+.msg-markdown th, .msg-markdown td {
+  border: 1px solid hsl(var(--border));
+  padding: 0.4em 0.7em;
+  text-align: left;
+}
+.msg-markdown th { background: hsl(var(--muted)); font-weight: 600; }
+/* 分割线 */
+.msg-markdown hr { margin: 1em 0; border: none; border-top: 1px solid hsl(var(--border)); }
+
 @layer base {
   :root {
     color-scheme: light;

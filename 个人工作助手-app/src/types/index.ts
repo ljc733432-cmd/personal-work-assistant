@@ -26,12 +26,17 @@ export interface ProviderInput {
 
 export type ChatRole = 'system' | 'user' | 'assistant' | 'tool'
 
+export interface ToolCallInfo {
+  name: string
+  args: string
+}
+
 export interface ChatMessage {
   id: string
   role: ChatRole
   content: string
   streaming?: boolean // 该条正在流式接收中
-  toolCallName?: string // 若是 FC 触发标记
+  toolCalls?: ToolCallInfo[] // 本轮发起的工具调用（独立展示，不混入 content）
 }
 
 export interface ChatSendParams {
