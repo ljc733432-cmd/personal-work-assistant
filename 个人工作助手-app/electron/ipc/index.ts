@@ -170,8 +170,10 @@ function registerChatHandlers() {
   const abortMap = new Map<string, AbortController>()
   // reqId → confirm resolver（工具需要用户确认时挂起）
   const confirmMap = new Map<string, (approved: boolean) => void>()
-  // 本次会话（应用运行期间）已授权的目录，只读，重启清空
+  // 本次会话（应用运行期间）已授权读取的目录，只读，重启清空
   const sessionApprovedDirs: AccessibleDir[] = []
+  // 本次会话用户授权可写的目录路径（系统位置/预填目录被授权写后加入），重启清空
+  const sessionWritableDirs: string[] = []
 
   // 路径比较（大小写不敏感 + 规范化，兼容 Win）
   const samePath = (a: string, b: string) =>
@@ -220,10 +222,16 @@ function registerChatHandlers() {
             })
           }
         }
-        // 会话已确认（只读，会话级）
+        // 会话已确认读取（只读，会话级）
         for (const sd of sessionApprovedDirs) {
           if (!list.some((x) => samePath(x.path, sd.path))) {
             list.push({ ...sd, source: 'session' })
+          }
+        }
+        // 会话已授权写入 → 把匹配的目录 mode 提升为 readwrite
+        for (let i = 0; i < list.length; i++) {
+          if (sessionWritableDirs.some((wd) => samePath(wd, list[i].path))) {
+            list[i] = { ...list[i], mode: 'readwrite' }
           }
         }
         return list
@@ -231,11 +239,16 @@ function registerChatHandlers() {
 
       const ctx: ToolContext = {
         get sources() {
-          return buildSources() // 动态读取（sessionApproved 会变）
+          return buildSources() // 动态读取（sessionApproved/Writable 会变）
         },
         onSessionApprove: (dir, label) => {
           if (!sessionApprovedDirs.some((x) => samePath(x.path, dir))) {
             sessionApprovedDirs.push({ label, path: dir, source: 'session', mode: 'read' })
+          }
+        },
+        onSessionWritable: (dir) => {
+          if (!sessionWritableDirs.some((wd) => samePath(wd, dir))) {
+            sessionWritableDirs.push(dir)
           }
         },
       }

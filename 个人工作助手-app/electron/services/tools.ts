@@ -32,8 +32,10 @@ import path from 'node:path'
 
 export interface ToolContext {
   sources: AccessibleDir[]
-  /** 用户确认访问某目录后，把它加入会话授权（本次会话有效）。 */
+  /** 用户确认读取某目录后，加入会话授权（只读，本次会话有效）。 */
   onSessionApprove: (dir: string, label: string) => void
+  /** 用户授权写入某系统/只读目录后，把该目录标记为会话级可写（本次会话有效）。 */
+  onSessionWritable: (dir: string) => void
 }
 
 // ---------- 当前时间 ----------
@@ -172,22 +174,21 @@ function makeWriteFileTool(ctx: ToolContext): ToolRegistration {
       type: 'function',
       function: {
         name: 'write_file',
-        description: `写入/创建文件。可写目录：${rwLabels || '（暂无，写入需用户确认）'}。覆盖已存在文件前会要求用户确认。注意：文档/桌面/下载是只读的，不能写。`,
+        description: `写入/创建文件，生成 markdown/文本等。可写目录：${rwLabels || '（首次写入任意可读目录会请求用户授权）'}。覆盖已存在文件前会要求确认。文档/桌面/下载默认只读，但用户授权后本次会话可写。`,
         parameters: {
           type: 'object',
           properties: {
-            path: { type: 'string', description: '目标文件路径，相对可写目录或绝对路径' },
+            path: { type: 'string', description: '目标文件路径，相对某可读目录或绝对路径' },
             content: { type: 'string', description: '要写入的内容' },
           },
           required: ['path', 'content'],
         },
       },
     },
-    handler: async (args) => {
+    handler: async (args, confirm) => {
       const p = String(args.path ?? '')
       const content = String(args.content ?? '')
 
-      // 大小校验先做
       const bytes = Buffer.byteLength(content, 'utf-8')
       if (bytes > MAX_WRITE_BYTES) {
         return {
@@ -198,11 +199,51 @@ function makeWriteFileTool(ctx: ToolContext): ToolRegistration {
 
       const r = resolveSafePath(p, ctx.sources, { forWrite: true })
       if (r.ok && r.fullPath) {
-        // 路径合法 → 走覆盖确认
         return makeWriteConfirm(r.fullPath, content, r.belonging?.label)
+      }
+      // 落到只读系统位置/预填目录 → 请求写授权
+      if (r.needsWriteConfirm) {
+        const dir = r.needsWriteConfirm
+        const label = path.basename(dir) || dir
+        const prompt = `AI 请求向目录写入文件：\n${dir}\n\n该目录默认只读。允许后，本次会话内 AI 可向此目录写入（覆盖仍会单独确认）。是否允许？`
+        if (!confirm) {
+          return { kind: 'result', value: JSON.stringify({ error: `需向 ${dir} 写入，但当前不支持确认` }) }
+        }
+        return {
+          kind: 'confirm',
+          prompt,
+          action: async () => {
+            const approved = await confirm(prompt)
+            if (!approved) {
+              return JSON.stringify({ cancelled: true, message: '用户拒绝向该目录写入' })
+            }
+            ctx.onSessionWritable(dir)
+            // 授权后重新解析（此时该目录已是 readwrite）
+            const r2 = resolveSafePath(p, ctx.sources, { forWrite: true })
+            if (r2.ok && r2.fullPath) {
+              return await executeWrite(r2.fullPath, content, r2.belonging?.label)
+            }
+            return JSON.stringify({ error: r2.error ?? '授权后仍无法写入' })
+          },
+        }
       }
       return { kind: 'result', value: JSON.stringify({ error: r.error }) }
     },
+  }
+}
+
+/** 实际执行写入（覆盖前进回收站）。 */
+async function executeWrite(fullPath: string, content: string, label?: string): Promise<string> {
+  try {
+    const exists = fs.existsSync(fullPath)
+    let trashed: string | null = null
+    if (exists) trashed = moveToTrash(fullPath)
+    await fsp.mkdir(path.dirname(fullPath), { recursive: true })
+    await fsp.writeFile(fullPath, content, 'utf-8')
+    const bytes = Buffer.byteLength(content, 'utf-8')
+    return JSON.stringify({ ok: true, path: fullPath, baseLabel: label, written: bytes, overwritten: exists, trashedTo: trashed })
+  } catch (e) {
+    return JSON.stringify({ error: `写入失败: ${String(e)}` })
   }
 }
 
@@ -215,18 +256,7 @@ function makeWriteConfirm(fullPath: string, content: string, label?: string): To
   return {
     kind: 'confirm',
     prompt,
-    action: async () => {
-      try {
-        let trashed: string | null = null
-        if (exists) trashed = moveToTrash(fullPath)
-        await fsp.mkdir(path.dirname(fullPath), { recursive: true })
-        await fsp.writeFile(fullPath, content, 'utf-8')
-        const bytes = Buffer.byteLength(content, 'utf-8')
-        return JSON.stringify({ ok: true, path: fullPath, baseLabel: label, written: bytes, overwritten: exists, trashedTo: trashed })
-      } catch (e) {
-        return JSON.stringify({ error: `写入失败: ${String(e)}` })
-      }
-    },
+    action: () => executeWrite(fullPath, content, label),
   }
 }
 
@@ -268,7 +298,17 @@ async function withDirConfirm(
       },
     }
   }
-  return { kind: 'result', value: JSON.stringify({ error: r.error }) }
+  // 解析失败：把可用目录告诉 AI，引导它用对路径
+  return {
+    kind: 'result',
+    value: JSON.stringify({
+      error: r.error ?? '路径解析失败',
+      inputPath,
+      hint: '可访问的目录（用这些路径或 label 前缀）：',
+      accessibleDirs: ctx.sources.map((d) => ({ label: d.label, path: d.path })),
+      suggestion: `试试 list_accessible_dirs 查看可用目录，或用「${ctx.sources[0]?.label ?? '文档'}/文件名」格式。`,
+    }),
+  }
 }
 
 // ---------- 工具组装入口 ----------

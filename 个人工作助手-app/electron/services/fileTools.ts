@@ -30,8 +30,10 @@ export interface ResolvedPath {
   ok: boolean
   fullPath?: string
   belonging?: AccessibleDir
-  /** 需要用户首次确认访问的目录（绝对路径）。上层据此走 confirm 流程。 */
+  /** 读取需首次确认的目录（绝对路径）。 */
   needsConfirm?: string
+  /** 写入需用户授权的目录（绝对路径，落到只读 source 内）。授权后本次会话可写。 */
+  needsWriteConfirm?: string
   error?: string
 }
 
@@ -70,17 +72,18 @@ export function resolveSafePath(
     return { ok: true, fullPath: full, belonging }
   }
 
-  // 写操作：落在只读 source（如系统位置）→ 直接拒
+  // 写操作：落在只读 source（如系统位置）→ 需用户授权，授权后本次会话可写
   if (forWrite) {
     const inReadonly = sources.find((d) => {
       const rp = path.resolve(d.path)
       return (full === rp || full.startsWith(rp + path.sep)) && d.mode === 'read'
     })
     if (inReadonly) {
-      return { ok: false, error: `目录「${inReadonly.label}」是只读的，不允许写入。` }
+      // 不直接拒，而是要求授权（用户同意后本次会话该目录变可写）
+      return { ok: false, needsWriteConfirm: path.resolve(inReadonly.path) }
     }
-    // 写入到全新目录 → 需确认（且确认后也只本次会话有效）
-    return { ok: false, error: `写入路径不在任何可写目录内：${inputPath}` }
+    // 写入到全新目录 → 拒绝（写入必须落在已知目录内）
+    return { ok: false, error: `写入路径不在任何可访问目录内：${inputPath}。可让用户在「常用目录」里添加该目录为「读写」。` }
   }
 
   // 读操作：绝对路径但不在任何 source 内 → 需用户首次确认
