@@ -48,7 +48,7 @@
 }
 
 /* highlight.js 暗色主题（代码块） */
-@import 'highlight.js/styles/github-dark.css';
+@import 'highlight.js/styles/github.css';
 
 /* ===== 消息 Markdown 排版（prose 简化版） ===== */
 .msg-markdown {
@@ -92,19 +92,22 @@
   white-space: break-spaces;
   word-break: break-all;
 }
-/* 代码块 */
+/* 代码块：浅色背景（不用深黑，在白底气泡里难看） */
 .msg-markdown pre {
   margin: 0.7em 0;
   padding: 0.9em 1em;
   border-radius: 8px;
   overflow-x: auto;
-  background: #0d1117 !important;
+  background: hsl(var(--muted)) !important;
+  border: 1px solid hsl(var(--border));
 }
 .msg-markdown pre code {
   background: transparent;
   padding: 0;
   font-size: 0.82em;
   line-height: 1.5;
+  color: hsl(var(--foreground));
+  border: none;
 }
 /* 表格 */
 .msg-markdown table {
