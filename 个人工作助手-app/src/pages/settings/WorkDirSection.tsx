@@ -18,17 +18,16 @@ export function WorkDirSection() {
       <div>
         <h2 className="text-lg font-semibold">常用目录（可选）</h2>
         <p className="mt-1 text-sm text-muted-foreground">
-          AI <strong>默认已能读取</strong>系统的「文档」「桌面」「下载」三个目录，不用在这里配置。
-          这里填的是<strong>额外常用目录</strong>（比如你的报告文件夹），省得每次对话都要说路径。
-          对话里临时指定的目录，AI 会首次询问后自动记住（本次会话有效）。
+          <strong>默认全盘可读</strong>（密钥/系统目录受保护）。一旦在这里添加目录，
+          AI 的读取范围就<strong>锁定到这些目录</strong>——不再全盘，只读你指定的。
+          留空 = 全盘可读；填了 = 锁定范围。按需选择。
         </p>
       </div>
 
       {workDirs.length === 0 && (
         <Card className="border-dashed bg-muted/30">
           <CardContent className="py-6 text-center text-sm text-muted-foreground">
-            没有额外常用目录。AI 默认能读「文档/桌面/下载」，对话里也能临时指定——
-            这里留空完全没问题。
+            当前是<strong>全盘可读</strong>模式。添加目录后会锁定到指定范围。
           </CardContent>
         </Card>
       )}

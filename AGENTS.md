@@ -79,8 +79,9 @@
 - FC（Function Calling）：模型返回 `tool_calls` → 主进程执行 → 结果作为 `role:'tool'` 回灌 → 模型给最终答。
 - **状态修改类 FC（标记完成/改截止日）必须二次确认**（FC 返回意图 → UI 弹确认 → 确认才执行）。
 - **文件工具动态注册**（M5.1）：工具集按当前 sources（系统位置+预填+会话确认）在 `assembleTools(ctx)` 组装。sources 通过 getter 动态读取（sessionApproved 会变）。**不要写死工具集，不要把 sources 当静态数组。**
-- **读取三来源**（M5.1）：系统位置（文档/桌面/下载，只读）+ 预填常用目录（设置页，可选）+ 会话已确认目录（对话临时指定，首次确认后本次会话有效）。**不要让用户必须预填才能用**——系统位置开箱即用。
-- **首次确认机制**（M5.1）：读操作遇 sources 外新目录 → `{needsConfirm}` → FC 循环挂起 → 用户同意 → 加入 sessionApprovedDirs → 重试。系统位置/预填不弹。
+- **读取双模式**（M5.2）：**默认全盘可读**（黑名单敏感目录除外），用户在设置页配了常用目录后**锁定到该范围**。这是"开放默认、按需收窄"的设计。
+- **敏感目录黑名单**（M5.2）：`isSensitive()` 永远拦截 .ssh/.gnupg/AppData/Windows/$RECYCLE.BIN/System Volume Information/node_modules/.git/本应用 userData。即便全盘模式也不读。**改黑名单清单必须更新 sensitiveDirs.ts。**
+- **find_files 全盘模式**：全盘递归扫描不现实，必须提供 `searchDir`（绝对路径）。锁定模式才默认搜全部 sources。
 - **write_file 走可挂起 confirm 机制**（M5）：handler 返回 `{kind:'confirm', prompt, action}`，FC 循环 await `onConfirm` → 推 `chat:confirm_request` → 前端弹窗 → 用户选 → resolve。**不要在 handler 内同步写文件，必须经 confirm。**
 
 ---

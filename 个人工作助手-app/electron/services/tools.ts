@@ -131,12 +131,15 @@ function makeReadFileTool(ctx: ToolContext): ToolRegistration {
 
 // ---------- find_files ----------
 function makeFindFilesTool(ctx: ToolContext): ToolRegistration {
+  const locked = ctx.sources.length > 0
   return {
     def: {
       type: 'function',
       function: {
         name: 'find_files',
-        description: '在可访问目录里按文件名/日期/扩展名搜索。用户说「找某天的报告」「7月30号的文件」时用这个。默认搜全部可访问目录。',
+        description: locked
+          ? '在已配置的目录里按文件名/日期/扩展名搜索。用户说「找某天的报告」时用。默认搜全部已配置目录。'
+          : '按文件名/日期/扩展名搜索文件。当前为「全盘模式」（仅密钥/系统目录受保护）。因全盘扫描不现实，必须提供 searchDir 指定搜索的目录。如不知道目录，先问用户文件大概在哪。',
         parameters: {
           type: 'object',
           properties: {
@@ -144,9 +147,10 @@ function makeFindFilesTool(ctx: ToolContext): ToolRegistration {
             dateFrom: { type: 'string', description: '修改日期起点，YYYY-MM-DD，含当天' },
             dateTo: { type: 'string', description: '修改日期终点，YYYY-MM-DD，含当天' },
             ext: { type: 'string', description: '扩展名，如 "md"、"docx"，可选' },
-            baseLabel: { type: 'string', description: '限定某个目录 label，可选' },
+            baseLabel: { type: 'string', description: '锁定模式下限定某目录 label，可选' },
+            searchDir: { type: 'string', description: '全盘模式下必填：要搜索的目录绝对路径，如 D:\\\\工作' },
           },
-          required: [],
+          required: locked ? [] : ['searchDir'],
         },
       },
     },
@@ -157,6 +161,7 @@ function makeFindFilesTool(ctx: ToolContext): ToolRegistration {
         dateTo: args.dateTo ? String(args.dateTo) : undefined,
         ext: args.ext ? String(args.ext) : undefined,
         baseLabel: args.baseLabel ? String(args.baseLabel) : undefined,
+        searchDir: args.searchDir ? String(args.searchDir) : undefined,
       }
       return findFiles(params, ctx.sources)
     },
@@ -313,13 +318,13 @@ async function withDirConfirm(
 
 // ---------- 工具组装入口 ----------
 export function assembleTools(ctx: ToolContext): ToolRegistration[] {
-  const tools: ToolRegistration[] = [getCurrentTimeTool]
-  if (ctx.sources.length === 0) return tools
-
-  tools.push(makeListDirsTool(ctx))
-  tools.push(makeListFilesTool(ctx))
-  tools.push(makeReadFileTool(ctx))
-  tools.push(makeFindFilesTool(ctx))
-  tools.push(makeWriteFileTool(ctx))
-  return tools
+  // 始终注册文件工具（全盘模式 sources 为空，工具内部处理）
+  return [
+    getCurrentTimeTool,
+    makeListDirsTool(ctx),
+    makeListFilesTool(ctx),
+    makeReadFileTool(ctx),
+    makeFindFilesTool(ctx),
+    makeWriteFileTool(ctx),
+  ]
 }

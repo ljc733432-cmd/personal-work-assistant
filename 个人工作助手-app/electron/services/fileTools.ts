@@ -5,6 +5,7 @@ import fsp from 'node:fs/promises'
 import path from 'node:path'
 import type { WorkDir } from '../types'
 import type { AccessibleDir } from './systemDirs'
+import { isSensitive, SENSITIVE_HINT } from './sensitiveDirs'
 import { logInfo, logError } from './logger'
 
 const require = createRequire(import.meta.url)
@@ -38,14 +39,18 @@ export interface ResolvedPath {
 }
 
 /**
- * 把「模型给的路径」解析为安全的绝对路径（M5.1 多来源版）。
+ * 把「模型给的路径」解析为安全的绝对路径（M5.2 双模式）。
  *
- * sources = 系统位置 + 预填 workDirs + 会话已确认目录。
- * - 绝对路径：若落在某 source 内 → ok；否则视为「新目录」→ needsConfirm。
- * - 相对路径：按 baseLabel 或首个 source 解析；解析后仍需落在某 source 内。
- * - 防御 ../ 逃逸：path.resolve + startsWith 双重判定。
+ * 两种模式：
+ *  1. **锁定模式**（sources 非空）：用户配了常用目录/系统位置/会话目录 → 只能在这些范围内读。
+ *     - 落在某 source 内 → ok；绝对路径越界 → needsConfirm（首次确认新目录）。
+ *  2. **全盘模式**（sources 为空，默认）：没配任何范围 → 全盘可读，仅黑名单约束。
+ *     - 路径不在黑名单内 → ok（belonging 标记 source='full-disk'）。
+ *     - 落黑名单内 → 拒绝。
  *
- * forWrite 时：只接受 mode=readwrite 的 source（系统位置/只读预填都拒绝写）。
+ * forWrite 时：写入永远需要 readwrite source 或授权（全盘模式写入也走 needsWriteConfirm）。
+ *
+ * 防御 ../ 逃逸：path.resolve 规范化。
  */
 export function resolveSafePath(
   inputPath: string,
@@ -53,47 +58,72 @@ export function resolveSafePath(
   opts: { forWrite?: boolean; baseLabel?: string } = {},
 ): ResolvedPath {
   const { forWrite = false, baseLabel } = opts
-
-  // 写操作：只要 readwrite 的 source
-  const candidates = sources.filter((d) => (forWrite ? d.mode === 'readwrite' : true))
+  const fullDiskMode = sources.length === 0
 
   const isAbs = path.isAbsolute(inputPath)
   const full = isAbs
     ? path.resolve(inputPath)
     : path.resolve(baseRoot(sources, baseLabel), inputPath)
 
-  // 是否落在某 source 内
-  const belonging = candidates.find((d) => {
-    const rp = path.resolve(d.path)
-    return full === rp || full.startsWith(rp + path.sep)
-  })
-
-  if (belonging) {
-    return { ok: true, fullPath: full, belonging }
-  }
-
-  // 写操作：落在只读 source（如系统位置）→ 需用户授权，授权后本次会话可写
-  if (forWrite) {
-    const inReadonly = sources.find((d) => {
-      const rp = path.resolve(d.path)
-      return (full === rp || full.startsWith(rp + path.sep)) && d.mode === 'read'
-    })
-    if (inReadonly) {
-      // 不直接拒，而是要求授权（用户同意后本次会话该目录变可写）
-      return { ok: false, needsWriteConfirm: path.resolve(inReadonly.path) }
+  // 黑名单检查（两种模式都查）
+  if (isSensitive(full)) {
+    logError('[fileTools] 命中敏感目录黑名单，拒绝：', full)
+    return {
+      ok: false,
+      error: `路径落在受保护区域（密钥/系统目录等），已拒绝。${SENSITIVE_HINT}`,
     }
-    // 写入到全新目录 → 拒绝（写入必须落在已知目录内）
-    return { ok: false, error: `写入路径不在任何可访问目录内：${inputPath}。可让用户在「常用目录」里添加该目录为「读写」。` }
   }
 
-  // 读操作：绝对路径但不在任何 source 内 → 需用户首次确认
-  if (isAbs) {
-    return { ok: false, needsConfirm: extractDirRoot(full) }
+  // ===== 锁定模式 =====
+  if (!fullDiskMode) {
+    const candidates = sources.filter((d) => (forWrite ? d.mode === 'readwrite' : true))
+    const belonging = candidates.find((d) => {
+      const rp = path.resolve(d.path)
+      return full === rp || full.startsWith(rp + path.sep)
+    })
+
+    if (belonging) {
+      return { ok: true, fullPath: full, belonging }
+    }
+
+    // 写操作：落在只读 source → 需授权
+    if (forWrite) {
+      const inReadonly = sources.find((d) => {
+        const rp = path.resolve(d.path)
+        return (full === rp || full.startsWith(rp + path.sep)) && d.mode === 'read'
+      })
+      if (inReadonly) {
+        return { ok: false, needsWriteConfirm: path.resolve(inReadonly.path) }
+      }
+      return { ok: false, error: `写入路径不在任何可写目录内：${inputPath}。可让用户添加该目录为「读写」。` }
+    }
+
+    // 读操作：绝对路径不在 sources 内 → 需首次确认
+    if (isAbs) {
+      return { ok: false, needsConfirm: extractDirRoot(full) }
+    }
+    // 相对路径越界 → 拒绝
+    return {
+      ok: false,
+      error: `路径不在可访问范围内：${inputPath}（当前为锁定模式，可用 list_accessible_dirs 查看范围）`,
+    }
   }
 
-  // 相对路径解析后越界 → 拒绝（相对路径不触发首次确认，避免歧义）
-  logError('[fileTools] 相对路径越界，拒绝：', full)
-  return { ok: false, error: `路径不在可访问范围内：${inputPath}（可用 list_accessible_dirs 查看）` }
+  // ===== 全盘模式 =====
+  // 读操作：已在黑名单检查通过 → 直接允许
+  if (!forWrite) {
+    return {
+      ok: true,
+      fullPath: full,
+      belonging: { label: '全盘', path: path.parse(full).root, source: 'system', mode: 'read' },
+    }
+  }
+
+  // 全盘模式下的写操作：仍需授权（不能默默写）
+  return {
+    ok: false,
+    needsWriteConfirm: extractDirRoot(full),
+  }
 }
 
 /** 取 base 根路径：显式 baseLabel 优先，否则首个 source。 */
@@ -242,7 +272,8 @@ export interface FindParams {
   dateFrom?: string // ISO 日期，含
   dateTo?: string
   ext?: string // 扩展名，如 "md" 或 ".md"
-  baseLabel?: string // 限定某个白名单根，不填则搜全部
+  baseLabel?: string // 锁定模式下限定某 source
+  searchDir?: string // 全盘模式下指定搜索目录（绝对路径）
 }
 
 export interface FindResult {
@@ -254,15 +285,40 @@ export interface FindResult {
   baseLabel: string
 }
 
-/** 递归扫描可访问目录，按 名/日期/扩展名 过滤。跨系统位置/预填/会话确认的目录。 */
+/** 递归扫描目录，按 名/日期/扩展名 过滤。
+ *  - 锁定模式（sources 非空）：搜 sources；baseLabel 可限定。
+ *  - 全盘模式（sources 空）：必须提供 searchDir（全盘扫描不现实），否则要求 AI 先指定目录。 */
 export async function findFiles(params: FindParams, sources: AccessibleDir[]): Promise<string> {
-  const roots = params.baseLabel
-    ? sources.filter((d) => d.label === params.baseLabel || d.path === params.baseLabel)
-    : sources
-  if (roots.length === 0) {
-    return JSON.stringify({ error: '没有可访问的目录（系统位置/工作目录均不可用）' })
+  const fullDiskMode = sources.length === 0
+
+  // 锁定模式：roots = sources（可按 baseLabel 限定）
+  if (!fullDiskMode) {
+    const roots = params.baseLabel
+      ? sources.filter((d) => d.label === params.baseLabel || d.path === params.baseLabel)
+      : sources
+    if (roots.length === 0) {
+      return JSON.stringify({ error: '没有可访问的目录' })
+    }
+    return runFind(params, roots)
   }
 
+  // 全盘模式：必须有 searchDir
+  if (!params.searchDir) {
+    return JSON.stringify({
+      error: '全盘模式下请指定 searchDir（要搜索的目录绝对路径）。',
+      reason: '全盘递归扫描文件量巨大不现实。',
+      hint: '例如：先问用户文件大概在哪个目录（如 D:\\工作），或在 searchDir 里给绝对路径。',
+    })
+  }
+  const dir = path.resolve(params.searchDir)
+  if (isSensitive(dir)) {
+    return JSON.stringify({ error: `搜索目录落在受保护区域，已拒绝。${SENSITIVE_HINT}` })
+  }
+  return runFind(params, [{ label: dir, path: dir, source: 'session', mode: 'read' }])
+}
+
+/** 实际执行递归扫描。roots 由上层（findFiles）已确定范围。 */
+async function runFind(params: FindParams, roots: AccessibleDir[]): Promise<string> {
   const extNorm = params.ext ? (params.ext.startsWith('.') ? params.ext.toLowerCase() : '.' + params.ext.toLowerCase()) : null
   const queryLower = params.query?.toLowerCase()
   const fromMs = params.dateFrom ? new Date(params.dateFrom).getTime() : null
@@ -310,15 +366,27 @@ export async function findFiles(params: FindParams, sources: AccessibleDir[]): P
 
 /** 返回当前可访问的目录清单（label/path/source/mode），供模型决定去哪找。 */
 export function listAccessibleDirs(sources: AccessibleDir[]): string {
+  if (sources.length === 0) {
+    // 全盘模式
+    return JSON.stringify({
+      mode: 'full-disk',
+      count: 0,
+      hint: '当前为「全盘可读」模式：可读取电脑上任意位置的文件（用绝对路径），仅密钥/系统目录受保护。find_files 需指定 searchDir（全盘扫描不现实）。读写仍需用户授权。',
+      protection: SENSITIVE_HINT,
+      dirs: [],
+    })
+  }
+  // 锁定模式
   const dirs = sources.map((d) => ({
     label: d.label,
     path: d.path,
-    source: d.source, // system | workdir | session
-    mode: d.mode, // read | readwrite
+    source: d.source,
+    mode: d.mode,
   }))
   return JSON.stringify({
+    mode: 'locked',
     count: dirs.length,
-    hint: '这些是当前可读的目录。用户说「读某文件」时优先在这些目录找；find_files 默认搜全部。如需访问其他目录，告诉用户路径或让用户在对话里指定。',
+    hint: '当前为「锁定」模式：只能在这些目录读/写。如需访问其他目录，让用户在对话里指定（首次会确认）。',
     dirs,
   })
 }
