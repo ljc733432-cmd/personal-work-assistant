@@ -29,6 +29,7 @@ import { listSearchProviders, getActiveSearchConfig } from '../services/search/f
 import { pingTavily } from '../services/searchTools'
 import { chatWithProvider, type ChatResult } from '../services/providers/chat'
 import { truncateByTokenBudget } from '../services/providers/truncate'
+import { extractTasks } from '../services/taskExtractor'
 import { assembleTools, type ToolContext } from '../services/tools'
 import { getSystemDirs, type AccessibleDir } from '../services/systemDirs'
 import { PROVIDER_PRESETS } from '../services/providers/types'
@@ -44,6 +45,8 @@ import type {
   SearchProvider,
   Task,
   TaskInput,
+  TaskDraft,
+  TaskDraftInput,
   Conversation,
   ConversationInput,
   ConversationMessage,
@@ -637,6 +640,52 @@ function registerTaskHandlers() {
     try {
       getDb().delete(tasks).where(eq(tasks.id, id)).run()
       return ok(true)
+    } catch (e) {
+      return err(String(e))
+    }
+  })
+
+  // M4：抽取任务草稿（不直接入库，红线：必须人工确认）。
+  // providerId 从 settings 读（extract.providerId），不信任前端传——保证用「最便宜模型」。
+  ipcMain.handle('task:extract', async (_, conversationId: string): Promise<IpcResult<TaskDraft[]>> => {
+    try {
+      // 读抽取模型配置
+      const providerRow = getDb().select().from(settings).where(eq(settings.key, 'extract.providerId')).get()
+      const extractProviderId = providerRow?.value ?? null
+      if (!extractProviderId) return err('未配置抽取模型，请在设置页「任务抽取」区选择一个模型')
+      // 读会话历史
+      const history = listMessages(conversationId).map((m) => ({
+        role: m.role,
+        content: m.content,
+      }))
+      if (history.length === 0) return ok([])
+      const drafts = await extractTasks(extractProviderId, history)
+      return ok(drafts)
+    } catch (e) {
+      return err(String(e))
+    }
+  })
+
+  // M4：草稿确认入库（用户点"加入任务"后调）。
+  // source 强制 from_chat + 填 sourceConversationId（溯源），与 task:upsert（manual）平行。
+  ipcMain.handle('task:create_from_draft', (_, input: TaskDraftInput): IpcResult<Task> => {
+    try {
+      const db = getDb()
+      const id = randomUUID()
+      db.insert(tasks)
+        .values({
+          id,
+          title: input.title,
+          description: input.description ?? null,
+          status: 'todo', // 草稿入库恒为待办
+          priority: input.priority ?? 'medium',
+          dueDate: input.dueDate ?? null,
+          source: 'from_chat',
+          sourceConversationId: input.conversationId, // 溯源
+        })
+        .run()
+      const row = db.select().from(tasks).where(eq(tasks.id, id)).get()!
+      return ok(rowToTask(row))
     } catch (e) {
       return err(String(e))
     }

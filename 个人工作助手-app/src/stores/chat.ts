@@ -1,5 +1,5 @@
 import { create } from 'zustand'
-import type { ChatMessage, Conversation, ConversationMessage } from '@/types'
+import type { ChatMessage, Conversation, ConversationMessage, TaskDraft } from '@/types'
 import { invoke } from '@/lib/ipc'
 
 /**
@@ -21,15 +21,17 @@ export interface ConvMeta {
   firstTokenMs: number | null
   error: string | null
   truncatedNotice: string | null // M2-Step7：上下文截断提示（如「已省略较早的 3 条」），下次发消息清
+  extracting: boolean // M4：任务抽取中（✨ 按钮 loading 态）
 }
 
 /** 默认 meta（空闲态）。模块级常量，避免每次新建。 */
-const IDLE_META: ConvMeta = { streaming: false, firstTokenMs: null, error: null, truncatedNotice: null }
+const IDLE_META: ConvMeta = { streaming: false, firstTokenMs: null, error: null, truncatedNotice: null, extracting: false }
 
 interface ChatState {
   conversations: Conversation[]
   messagesByConv: Record<string, ChatMessage[]>
   metaByConv: Record<string, ConvMeta>
+  draftsByConv: Record<string, TaskDraft[]> // M4：任务抽取草稿（per-conversation，未确认的）
   activeId: string | null
 
   // ---- 会话级 ----
@@ -61,6 +63,18 @@ interface ChatState {
   getMeta: (conversationId: string) => ConvMeta
   /** 更新某会话的 meta（patch 合并）。 */
   setMeta: (conversationId: string, patch: Partial<ConvMeta>) => void
+
+  // ---- 任务草稿（M4，per-conversation） ----
+  /** 取某会话的草稿（无记录返回空数组）。 */
+  getDrafts: (conversationId: string) => TaskDraft[]
+  /** 设置某会话的草稿（抽取完成后整体替换）。 */
+  setDrafts: (conversationId: string, drafts: TaskDraft[]) => void
+  /** 按 index 更新某会话的一条草稿（用户编辑草稿时）。 */
+  updateDraft: (conversationId: string, index: number, patch: Partial<TaskDraft>) => void
+  /** 按 index 删除某会话的一条草稿（忽略 / 加入后移除）。 */
+  removeDraft: (conversationId: string, index: number) => void
+  /** 清空某会话的草稿。 */
+  clearDrafts: (conversationId: string) => void
 }
 
 /** ConversationMessage（DB） → ChatMessage（内存）。与 ChatPage 原转换函数一致。 */
@@ -83,6 +97,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
   conversations: [],
   messagesByConv: {},
   metaByConv: {},
+  draftsByConv: {},
   activeId: null,
 
   loadConversations: async () => {
@@ -135,8 +150,15 @@ export const useChatStore = create<ChatState>((set, get) => ({
       const remaining = s.conversations.filter((c) => c.id !== id)
       const { [id]: _m, ...restMsgs } = s.messagesByConv
       const { [id]: _meta, ...restMeta } = s.metaByConv
+      const { [id]: _d, ...restDrafts } = s.draftsByConv
       const newActive = s.activeId === id ? (remaining[0]?.id ?? null) : s.activeId
-      return { conversations: remaining, messagesByConv: restMsgs, metaByConv: restMeta, activeId: newActive }
+      return {
+        conversations: remaining,
+        messagesByConv: restMsgs,
+        metaByConv: restMeta,
+        draftsByConv: restDrafts,
+        activeId: newActive,
+      }
     })
     // 删的是 active 且有剩余 → hydrate 新 active（若未 hydrate）
     const st = get()
@@ -186,4 +208,35 @@ export const useChatStore = create<ChatState>((set, get) => ({
       const cur = s.metaByConv[conversationId] ?? IDLE_META
       return { metaByConv: { ...s.metaByConv, [conversationId]: { ...cur, ...patch } } }
     }),
+
+  getDrafts: (conversationId) => get().draftsByConv[conversationId] ?? [],
+
+  setDrafts: (conversationId, drafts) =>
+    set((s) => ({ draftsByConv: { ...s.draftsByConv, [conversationId]: drafts } })),
+
+  updateDraft: (conversationId, index, patch) =>
+    set((s) => {
+      const cur = s.draftsByConv[conversationId] ?? []
+      if (index < 0 || index >= cur.length) return {}
+      return {
+        draftsByConv: {
+          ...s.draftsByConv,
+          [conversationId]: cur.map((d, i) => (i === index ? { ...d, ...patch } : d)),
+        },
+      }
+    }),
+
+  removeDraft: (conversationId, index) =>
+    set((s) => {
+      const cur = s.draftsByConv[conversationId] ?? []
+      return {
+        draftsByConv: {
+          ...s.draftsByConv,
+          [conversationId]: cur.filter((_, i) => i !== index),
+        },
+      }
+    }),
+
+  clearDrafts: (conversationId) =>
+    set((s) => ({ draftsByConv: { ...s.draftsByConv, [conversationId]: [] } })),
 }))

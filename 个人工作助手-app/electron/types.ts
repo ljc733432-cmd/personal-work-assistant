@@ -131,6 +131,26 @@ export interface TaskInput {
   enabled?: boolean // 未用，保留以与 WorkDirInput 风格一致（可忽略）
 }
 
+// ---------- TaskDraft：任务抽取草稿（M4） ----------
+// 见 CONTEXT.md「任务抽取草稿」。AI 从对话抽出的任务**草稿**，不直接入库。
+// 用户点"加入任务"才落库（→ task:create_from_draft，source 强制 from_chat）。
+// 字段比 Task 少：无 id/source/时间戳（这些入库时服务端填）。
+export interface TaskDraft {
+  title: string
+  description: string | null
+  priority: TaskPriority
+  dueDate: number | null // Unix 秒，null=无截止
+}
+
+/** 草稿确认入库入参（渲染层 → task:create_from_draft）。 */
+export interface TaskDraftInput {
+  title: string
+  description?: string | null
+  priority?: TaskPriority
+  dueDate?: number | null
+  conversationId: string // 溯源用，入库填 sourceConversationId
+}
+
 // ---------- Conversation / Message（M2 对话历史持久化） ----------
 // 见 PRD §4.2、CONTEXT.md「Conversation」「Message」。
 // type=normal 普通会话；type=followup 跟进会话（M6）。

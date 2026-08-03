@@ -1,5 +1,5 @@
 import { create } from 'zustand'
-import type { Task, TaskInput } from '@/types'
+import type { Task, TaskDraftInput, TaskInput } from '@/types'
 import { invoke } from '@/lib/ipc'
 
 interface TasksState {
@@ -8,6 +8,8 @@ interface TasksState {
   error: string | null
   refresh: () => Promise<void>
   upsert: (input: TaskInput) => Promise<void>
+  /** M4：草稿确认入库（source 服务端强制 from_chat）。 */
+  createFromDraft: (input: TaskDraftInput) => Promise<Task>
   remove: (id: string) => Promise<void>
 }
 
@@ -30,6 +32,13 @@ export const useTasksStore = create<TasksState>((set) => ({
     await invoke<Task>('task:upsert', input)
     const list = await invoke<Task[]>('task:list')
     set({ tasks: list })
+  },
+
+  createFromDraft: async (input) => {
+    const task = await invoke<Task>('task:create_from_draft', input)
+    const list = await invoke<Task[]>('task:list')
+    set({ tasks: list })
+    return task
   },
 
   remove: async (id) => {

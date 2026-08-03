@@ -8,6 +8,7 @@ import { invoke } from '@/lib/ipc'
 import type { Provider, ProviderInput, ProviderType } from '@/types'
 import { WorkDirSection } from './WorkDirSection'
 import { SearchProviderSection } from './SearchProviderSection'
+import { ExtractSection } from './ExtractSection'
 
 const PRESETS: Record<ProviderType, { baseURL: string; model: string }> = {
   deepseek: { baseURL: 'https://api.deepseek.com', model: 'deepseek-chat' },
@@ -75,6 +76,10 @@ export function SettingsPage() {
 
         <div className="!mt-10 border-t pt-2">
           <SearchProviderSection />
+        </div>
+
+        <div className="!mt-10 border-t pt-2">
+          <ExtractSection />
         </div>
       </div>
     </div>

@@ -6,9 +6,11 @@ import { Markdown } from '@/components/Markdown'
 import { ConfirmDialog } from '@/components/ui/dialog'
 import { useProvidersStore } from '@/stores/providers'
 import { useChatStore } from '@/stores/chat'
+import { useTasksStore } from '@/stores/tasks'
 import { ConversationList } from './ConversationList'
+import { DraftCard } from './DraftCard'
 import { invoke, on, send } from '@/lib/ipc'
-import type { ChatMessage, ConfirmRequest } from '@/types'
+import type { ChatMessage, ConfirmRequest, TaskDraft } from '@/types'
 
 let _seq = 0
 const genId = () => `m${Date.now()}_${_seq++}`
@@ -16,6 +18,7 @@ const genId = () => `m${Date.now()}_${_seq++}`
 // 模块级空数组常量：selector 返回它时引用稳定，避免 useSyncExternalStore 无限循环。
 // （zustand 在 React 18 strict 下要求 getSnapshot 返回值引用不变。）
 const EMPTY_MESSAGES: ChatMessage[] = []
+const EMPTY_DRAFTS: TaskDraft[] = []
 
 export function ChatPage() {
   const { providers, refresh } = useProvidersStore()
@@ -24,6 +27,13 @@ export function ChatPage() {
   const [enableTools, setEnableTools] = useState(true) // 默认开 FC，验证 TV-1
   const [confirmReq, setConfirmReq] = useState<ConfirmRequest | null>(null)
   const scrollRef = useRef<HTMLDivElement>(null)
+
+  // M4-Step7：自动抽取配置（ref，不触发重渲染，供 offDone 闭包读）。
+  // 设置页改了需重开生效（MVP，不做实时同步——避免每次 done 都 IPC 读）。
+  const extractConfig = useRef<{ enabled: boolean; providerId: string }>({
+    enabled: false,
+    providerId: '',
+  })
 
   // M2-Step4/6：会话、消息、流式元状态都从 store 读（per-conversation）。
   // 注意：selector 不能返回内联新对象/数组（如 `?? []`），否则 useSyncExternalStore 无限循环。
@@ -38,15 +48,37 @@ export function ChatPage() {
   const firstTokenMs = meta?.firstTokenMs ?? null
   const error = meta?.error ?? null
   const truncatedNotice = meta?.truncatedNotice ?? null
+  const extracting = meta?.extracting ?? false
+  const drafts = useChatStore((s) => (s.activeId ? s.draftsByConv[s.activeId] : undefined)) ?? EMPTY_DRAFTS
   const loadConversations = useChatStore((s) => s.loadConversations)
   const appendMessage = useChatStore((s) => s.appendMessage)
   const updateMessage = useChatStore((s) => s.updateMessage)
   const removeMessage = useChatStore((s) => s.removeMessage)
   const setMeta = useChatStore((s) => s.setMeta)
+  const setDrafts = useChatStore((s) => s.setDrafts)
+  const updateDraft = useChatStore((s) => s.updateDraft)
+  const removeDraft = useChatStore((s) => s.removeDraft)
+  const createFromDraft = useTasksStore((s) => s.createFromDraft)
 
   useEffect(() => {
     refresh()
   }, [refresh])
+
+  // M4-Step7：读自动抽取配置（mount 时读一次，设置页改了重开生效）
+  useEffect(() => {
+    ;(async () => {
+      try {
+        const enabled = await invoke<string | null>('settings:get', 'extract.enabled')
+        const providerId = await invoke<string | null>('settings:get', 'extract.providerId')
+        extractConfig.current = {
+          enabled: enabled === 'true',
+          providerId: providerId ?? '',
+        }
+      } catch {
+        /* 读配置失败不影响对话 */
+      }
+    })()
+  }, [])
 
   // 会话初始化（单会话兜底）+ 历史 hydrate —— 委托给 store。
   useEffect(() => {
@@ -157,6 +189,16 @@ export function ChatPage() {
       // cancelled=true（用户点取消）也走这里，content 保留已生成的部分。
       updateMessage(convId, aiMsg.id, { streaming: false })
       cleanup()
+      // M4-Step7：自动抽取（设置开了 + 配了抽取模型 + 无未确认草稿 + 非取消）
+      if (
+        !ev.cancelled &&
+        extractConfig.current.enabled &&
+        extractConfig.current.providerId &&
+        useChatStore.getState().getDrafts(convId).length === 0
+      ) {
+        // 不 await：自动抽取后台跑，不阻塞 done 流程
+        runExtract(convId).catch(() => {})
+      }
     })
     const offError = on('chat:error', (...args) => {
       const ev = args[0] as { reqId: string; message: string }
@@ -208,6 +250,54 @@ export function ChatPage() {
     send('chat:cancel', rid)
   }
 
+  // M4：抽取任务草稿核心逻辑（手动 ✨ 和自动都用）。
+  const runExtract = async (convId: string) => {
+    setMeta(convId, { extracting: true, error: null })
+    try {
+      const result = await invoke<TaskDraft[]>('task:extract', convId)
+      if (result.length > 0) {
+        setDrafts(convId, result)
+      } else if (convId === activeId) {
+        // 手动抽取时给"未识别到"提示；自动抽取静默（不打扰）
+        setMeta(convId, { error: '未识别到可执行的任务' })
+      }
+    } catch (e) {
+      if (convId === activeId) setMeta(convId, { error: String(e) })
+    } finally {
+      setMeta(convId, { extracting: false })
+    }
+  }
+
+  // M4：手动抽取（✨ 按钮）
+  const handleExtract = async () => {
+    if (!activeId || extracting) return
+    await runExtract(activeId)
+  }
+
+  // 草稿确认入库（source 服务端强制 from_chat + 溯源 conversationId）
+  const handleAcceptDraft = async (index: number) => {
+    if (!activeId) return
+    const draft = drafts[index]
+    if (!draft || !draft.title.trim()) return
+    try {
+      await createFromDraft({
+        title: draft.title.trim(),
+        description: draft.description,
+        priority: draft.priority,
+        dueDate: draft.dueDate,
+        conversationId: activeId,
+      })
+      removeDraft(activeId, index)
+    } catch (e) {
+      setMeta(activeId, { error: `加入任务失败：${String(e)}` })
+    }
+  }
+
+  const handleDismissDraft = (index: number) => {
+    if (!activeId) return
+    removeDraft(activeId, index)
+  }
+
   const enabledProviders = providers.filter((p) => p.enabled)
 
   return (
@@ -248,8 +338,19 @@ export function ChatPage() {
         {truncatedNotice && (
           <span className="text-xs text-amber-600">{truncatedNotice}</span>
         )}
+        {/* M4：手动抽取任务草稿（✨ 按钮） */}
+        <Button
+          variant="outline"
+          size="sm"
+          onClick={handleExtract}
+          disabled={!activeId || extracting || streaming}
+          className="ml-auto h-8 gap-1 text-xs"
+          title="从对话中识别任务草稿"
+        >
+          {extracting ? '抽取中…' : '✨ 抽取任务'}
+        </Button>
         {streaming && (
-          <span className="ml-auto animate-pulse text-xs text-muted-foreground">
+          <span className="animate-pulse text-xs text-muted-foreground">
             {firstTokenMs === null ? '思考中…' : '回复中…'}
           </span>
         )}
@@ -278,6 +379,29 @@ export function ChatPage() {
           ))}
         </div>
       </div>
+
+      {/* M4：任务草稿区（有草稿才显示，在消息区和输入区之间） */}
+      {drafts.length > 0 && (
+        <div className="border-t bg-amber-50/30 px-4 py-3">
+          <div className="mx-auto max-w-3xl space-y-2">
+            <div className="text-xs font-medium text-amber-700">
+              AI 识别到 {drafts.length} 条任务草稿，确认后加入任务
+            </div>
+            <div className="space-y-2">
+              {drafts.map((d, i) => (
+                <DraftCard
+                  key={i}
+                  draft={d}
+                  index={i}
+                  onUpdate={(patch) => activeId && updateDraft(activeId, i, patch)}
+                  onAccept={() => handleAcceptDraft(i)}
+                  onDismiss={() => handleDismissDraft(i)}
+                />
+              ))}
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* 输入区 */}
       <div className="border-t bg-card p-4">

@@ -154,6 +154,24 @@ export interface TaskInput {
   dueDate?: number | null
 }
 
+// ---------- TaskDraft：任务抽取草稿（M4） ----------
+// AI 从对话抽出的任务草稿，不直接入库，用户点"加入任务"才落库。
+export interface TaskDraft {
+  title: string
+  description: string | null
+  priority: TaskPriority
+  dueDate: number | null // Unix 秒，null=无截止
+}
+
+/** 草稿确认入库入参。 */
+export interface TaskDraftInput {
+  title: string
+  description?: string | null
+  priority?: TaskPriority
+  dueDate?: number | null
+  conversationId: string // 溯源用
+}
+
 // ---------- 工具确认请求（write_file 覆盖等） ----------
 export interface ConfirmRequest {
   reqId: string
