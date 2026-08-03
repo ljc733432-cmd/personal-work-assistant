@@ -78,6 +78,8 @@
 - 流式：主进程接收 → `webContents.send('chat:token', chunk)` → 渲染层逐字渲染，不阻塞 UI。
 - FC（Function Calling）：模型返回 `tool_calls` → 主进程执行 → 结果作为 `role:'tool'` 回灌 → 模型给最终答。
 - **状态修改类 FC（标记完成/改截止日）必须二次确认**（FC 返回意图 → UI 弹确认 → 确认才执行）。
+- **文件工具动态注册**（M5）：工具集按当前启用的 workDirs 在 `assembleTools()` 里组装。无 workDirs 时不注册任何文件工具（模型不知道有这能力）；只读目录注册 list/read/find；读写目录额外注册 write_file。**不要写死工具集。**
+- **write_file 走可挂起 confirm 机制**（M5）：handler 返回 `{kind:'confirm', prompt, action}`，FC 循环 await `onConfirm` → 推 `chat:confirm_request` → 前端弹窗 → 用户选 → resolve。**不要在 handler 内同步写文件，必须经 confirm。**
 
 ---
 
@@ -108,6 +110,7 @@
 - ❌ **不要做云同步/服务器/账号/多用户协作**。纯本地（PRD §2.2 明确砍掉）。
 - ❌ **不要执行系统命令 / shell**。安全风险。
 - ❌ **不要让 write_file 绕过白名单 + 覆盖确认 + 回收站**（写入三重防护，M5 实现）。
+- ❌ **不要绕过 `resolveSafePath`**。所有文件操作（list/read/find/write）的路径必须经它解析，防 `../` 逃逸 + 白名单校验。直接 `fs.readFile(用户给的路径)` 是红线。
 - ❌ **不要静默建任务**。任务抽取只产草稿，必须人工点"加入任务"才入库。
 - ❌ **不要静默丢历史消息**。上下文截断要 UI 提示"已省略较早的 X 条"。
 

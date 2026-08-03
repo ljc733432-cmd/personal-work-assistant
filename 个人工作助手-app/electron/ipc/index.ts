@@ -2,14 +2,19 @@ import { ipcMain, BrowserWindow } from 'electron'
 import { randomUUID } from 'node:crypto'
 import { eq } from 'drizzle-orm'
 import { getDb, dbHealthCheck } from '../services/db'
-import { providers, settings } from '../services/db/schema'
+import { providers, settings, workDirs } from '../services/db/schema'
 import { setSecret, deleteSecret } from '../services/secret'
-import { listProviders, createClientForProvider } from '../services/providers/factory'
+import {
+  listProviders,
+  createClientForProvider,
+  listEnabledWorkDirs,
+  listAllWorkDirs,
+} from '../services/providers/factory'
 import { chatWithProvider } from '../services/providers/chat'
-import { builtinTools } from '../services/tools'
+import { assembleTools } from '../services/tools'
 import { PROVIDER_PRESETS } from '../services/providers/types'
 import { logInfo } from '../services/logger'
-import type { ChatSendParams, IpcResult, ProviderInput, Provider } from '../types'
+import type { ChatSendParams, IpcResult, ProviderInput, Provider, WorkDir, WorkDirInput } from '../types'
 
 /**
  * IPC handler 注册中心。
@@ -159,11 +164,24 @@ function registerSettingsHandlers() {
 }
 
 function registerChatHandlers() {
-  // 取消用 send（单向）。当前实现：维护一个 AbortController 映射。
+  // reqId → AbortController（取消）
   const abortMap = new Map<string, AbortController>()
+  // reqId → confirm resolver（工具需要用户确认时挂起）
+  const confirmMap = new Map<string, (approved: boolean) => void>()
 
   ipcMain.on('chat:cancel', (_, reqId: string) => {
     abortMap.get(reqId)?.abort()
+    // 同时唤醒挂起的 confirm（视为拒绝）
+    confirmMap.get(reqId)?.(false)
+  })
+
+  // 前端确认结果回传：approve 或拒绝
+  ipcMain.on('chat:confirm_response', (_, payload: { reqId: string; approved: boolean }) => {
+    const resolve = confirmMap.get(payload.reqId)
+    if (resolve) {
+      confirmMap.delete(payload.reqId)
+      resolve(payload.approved)
+    }
   })
 
   ipcMain.handle('chat:send', async (_, params: ChatSendParams): Promise<IpcResult<string>> => {
@@ -176,6 +194,10 @@ function registerChatHandlers() {
       const ac = new AbortController()
       abortMap.set(reqId, ac)
 
+      // 动态组装工具：始终含 get_current_time；按 workDirs 加文件工具
+      const enabledWorkDirs = listEnabledWorkDirs()
+      const tools = params.enableTools ? assembleTools(enabledWorkDirs) : undefined
+
       const onToken = (text: string) => {
         win.webContents.send('chat:token', { reqId, text })
       }
@@ -185,23 +207,33 @@ function registerChatHandlers() {
       const onFirstToken = (elapsedMs: number) => {
         win.webContents.send('chat:first_token', { reqId, elapsedMs })
       }
+      // 工具需要确认（如 write_file 覆盖）→ 推事件给前端，挂起等响应
+      const onConfirm = (prompt: string) => {
+        return new Promise<boolean>((resolve) => {
+          confirmMap.set(reqId, resolve)
+          win.webContents.send('chat:confirm_request', { reqId, prompt })
+        })
+      }
 
       await chatWithProvider({
         client,
         model,
         messages: params.messages,
-        tools: params.enableTools ? builtinTools : undefined,
+        tools,
         onToken,
         onToolCall,
         onFirstToken,
+        onConfirm,
         signal: ac.signal,
       })
 
       win.webContents.send('chat:done', { reqId })
       abortMap.delete(reqId)
+      confirmMap.delete(reqId)
       return ok(reqId)
     } catch (e: unknown) {
       abortMap.delete(reqId)
+      confirmMap.delete(reqId)
       // 取消走 done（不算错误），其他异常走 error
       if (e instanceof Error && e.name === 'AbortError') {
         win.webContents.send('chat:done', { reqId, cancelled: true })
@@ -211,6 +243,65 @@ function registerChatHandlers() {
       win.webContents.send('chat:error', { reqId, message })
       return err(message)
     }
+  })
+}
+
+// ---------- WorkDir CRUD ----------
+function registerWorkDirHandlers() {
+  ipcMain.handle('workdir:list', (): IpcResult<WorkDir[]> => {
+    return ok(listAllWorkDirs())
+  })
+
+  ipcMain.handle('workdir:upsert', (_, input: WorkDirInput): IpcResult<WorkDir> => {
+    try {
+      const db = getDb()
+      const id = input.id ?? randomUUID()
+      const now = Math.floor(Date.now() / 1000)
+      const existing = db.select().from(workDirs).where(eq(workDirs.id, id)).get()
+
+      if (existing) {
+        db.update(workDirs)
+          .set({ label: input.label, path: input.path, mode: input.mode, enabled: input.enabled, updatedAt: now })
+          .where(eq(workDirs.id, id))
+          .run()
+      } else {
+        db.insert(workDirs)
+          .values({ id, label: input.label, path: input.path, mode: input.mode, enabled: input.enabled })
+          .run()
+      }
+      const row = db.select().from(workDirs).where(eq(workDirs.id, id)).get()!
+      return ok({
+        id: row.id,
+        label: row.label,
+        path: row.path,
+        mode: row.mode,
+        enabled: row.enabled,
+        createdAt: row.createdAt,
+        updatedAt: row.updatedAt,
+      })
+    } catch (e) {
+      return err(String(e))
+    }
+  })
+
+  ipcMain.handle('workdir:delete', (_, id: string) => {
+    try {
+      getDb().delete(workDirs).where(eq(workDirs.id, id)).run()
+      return ok(true)
+    } catch (e) {
+      return err(String(e))
+    }
+  })
+
+  // 选目录对话框（设置页添加目录用）
+  ipcMain.handle('workdir:pick', async (): Promise<IpcResult<string | null>> => {
+    const { dialog } = await import('electron')
+    const win = BrowserWindow.getAllWindows()[0] ?? null
+    const result = await dialog.showOpenDialog(win!, {
+      properties: ['openDirectory'],
+    })
+    if (result.canceled || result.filePaths.length === 0) return ok(null)
+    return ok(result.filePaths[0])
   })
 }
 
@@ -229,6 +320,7 @@ export function registerIpcHandlers() {
   registerProviderHandlers()
   registerSettingsHandlers()
   registerChatHandlers()
+  registerWorkDirHandlers()
   registerDbHandlers()
   registerMetaHandlers()
   logInfo('[ipc] handlers registered')

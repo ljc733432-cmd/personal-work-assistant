@@ -21,9 +21,16 @@ const ALLOWED_INVOKE = [
   'settings:set',           // 写 KV 设置
   'db:health',              // 数据库健康检查（M1 验证落库用）
   'meta:provider-presets',  // 取 Provider 预设（设置页填默认值用）
+  'workdir:list',           // 列工作目录白名单（M5）
+  'workdir:upsert',         // 新增/更新工作目录
+  'workdir:delete',         // 删除工作目录
+  'workdir:pick',           // 弹目录选择对话框（M5）
 ] as const
 
-const ALLOWED_SEND = ['chat:cancel'] as const
+const ALLOWED_SEND = [
+  'chat:cancel',            // 取消对话
+  'chat:confirm_response',  // 工具确认结果回传（write_file 覆盖确认，M5）
+] as const
 
 // 主进程主动推给渲染层的 channel（流式 token、状态变更确认等）
 const ALLOWED_ON = [
@@ -32,6 +39,7 @@ const ALLOWED_ON = [
   'chat:done',              // 一轮对话结束
   'chat:error',             // 出错
   'chat:tool_call',         // 模型发起 FC（用于二次确认类操作，M6 用）
+  'chat:confirm_request',   // 工具需要用户确认（write_file 覆盖，M5）
 ] as const
 
 function isAllowed(value: string, list: readonly string[]): boolean {

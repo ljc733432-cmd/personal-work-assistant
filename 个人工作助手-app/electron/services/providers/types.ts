@@ -10,13 +10,26 @@ import type { ChatMessage, ProviderType } from '../../types'
 /** OpenAI tools 参数格式（与 chat.completions 的 tools 一致）。 */
 export type ToolDef = OpenAI.Chat.ChatCompletionTool
 
-/** 工具执行器：主进程本地执行 FC，返回结果字符串回灌给模型。 */
-export type ToolHandler = (args: Record<string, unknown>) => Promise<string> | string
+/** 工具执行结果。分两种：
+ *  - result：直接回灌给模型。
+ *  - confirm：需要用户确认（如 write_file 覆盖），FC 循环会挂起弹窗。
+ */
+export type ToolHandlerResult =
+  | { kind: 'result'; value: string }
+  | { kind: 'confirm'; prompt: string; action: () => Promise<string> }
+
+/** 工具执行器：本地执行 FC。返回 result 或 confirm（需挂起等用户）。 */
+export type ToolHandler = (
+  args: Record<string, unknown>,
+) => Promise<ToolHandlerResult | string> | ToolHandlerResult | string
 
 export interface ToolRegistration {
   def: ToolDef
   handler: ToolHandler
 }
+
+/** 确认回调：FC 循环遇到 confirm 结果时调，传入 prompt，返回用户是否同意。 */
+export type ConfirmCallback = (prompt: string) => Promise<boolean>
 
 /** 一次 chat 请求的入参。 */
 export interface ChatRequest {

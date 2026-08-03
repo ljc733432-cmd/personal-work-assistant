@@ -47,6 +47,33 @@ export interface ChatSendParams {
 
 export type IpcResult<T> = { ok: true; data: T } | { ok: false; error: string }
 
+// ---------- WorkDir：工作目录白名单（M5） ----------
+export type WorkDirMode = 'read' | 'readwrite'
+
+export interface WorkDir {
+  id: string
+  label: string
+  path: string
+  mode: WorkDirMode
+  enabled: boolean
+  createdAt: number
+  updatedAt: number
+}
+
+export interface WorkDirInput {
+  id?: string
+  label: string
+  path: string
+  mode: WorkDirMode
+  enabled: boolean
+}
+
+// ---------- 工具确认请求（write_file 覆盖等） ----------
+export interface ConfirmRequest {
+  reqId: string
+  prompt: string
+}
+
 export interface ChatStreamEvent {
   reqId: string
   text?: string

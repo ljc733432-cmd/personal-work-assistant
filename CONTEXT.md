@@ -100,6 +100,18 @@ FC 工具 `web_search(query)`。v1 接 **Tavily + Bing 两家**，设置里可�
 ### **回收站（File Trash）**
 `userData/fileTrash/{timestamp}/`，存被覆盖的原文件。
 
+### **文件工具（File Tools，M5 已实现）**
+AI 通过 FC 操作白名单文件的能力。4 个工具：
+- `list_files(dir)` — 列目录内容（名/大小/修改时间）
+- `read_file(path)` — 读文件内容（txt/md/json/csv/代码/pdf/docx，大文件截断）
+- `find_files(query, dateFrom, dateTo, ext, baseLabel)` — 按名/日期/扩展名搜索
+- `write_file(path, content)` — 仅「读写」目录可用，走三重防护
+
+**动态注册**：工具集按当前启用的 workDirs 动态组装（assembleTools）。无 workDirs → 不注册任何文件工具（模型不知道有这能力）；有只读目录 → 注册 list/read/find；有读写目录 → 额外注册 write。
+
+### **工具确认（Tool Confirm，M5 已实现）**
+write_file 覆盖已存在文件时，FC 循环**挂起**：返回 `{kind:'confirm', prompt, action}` → 主进程推 `chat:confirm_request` → 渲染层弹窗 → 用户选 → `chat:confirm_response` 回传 → resolve 挂起的 Promise → 继续。这是「可挂起 FC 循环」机制（见 AGENTS.md §4）。
+
 ---
 
 ## E. 基础设施域

@@ -6,6 +6,7 @@ import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { useProvidersStore } from '@/stores/providers'
 import { invoke } from '@/lib/ipc'
 import type { Provider, ProviderInput, ProviderType } from '@/types'
+import { WorkDirSection } from './WorkDirSection'
 
 const PRESETS: Record<ProviderType, { baseURL: string; model: string }> = {
   deepseek: { baseURL: 'https://api.deepseek.com', model: 'deepseek-chat' },
@@ -65,6 +66,10 @@ export function SettingsPage() {
       ))}
 
       <AddProviderCard onAdd={(input) => upsert(input)} />
+
+      <div className="!mt-10 border-t pt-2">
+        <WorkDirSection />
+      </div>
     </div>
   )
 }

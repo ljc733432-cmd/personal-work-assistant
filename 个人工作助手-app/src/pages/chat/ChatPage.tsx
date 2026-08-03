@@ -3,9 +3,10 @@ import { Button } from '@/components/ui/button'
 import { Textarea } from '@/components/ui/textarea'
 import { Card } from '@/components/ui/card'
 import { Markdown } from '@/components/Markdown'
+import { ConfirmDialog } from '@/components/ui/dialog'
 import { useProvidersStore } from '@/stores/providers'
 import { invoke, on, send } from '@/lib/ipc'
-import type { ChatMessage } from '@/types'
+import type { ChatMessage, ConfirmRequest } from '@/types'
 
 let _seq = 0
 const genId = () => `m${Date.now()}_${_seq++}`
@@ -19,11 +20,27 @@ export function ChatPage() {
   const [enableTools, setEnableTools] = useState(true) // 默认开 FC，验证 TV-1
   const [error, setError] = useState<string | null>(null)
   const [firstTokenMs, setFirstTokenMs] = useState<number | null>(null)
+  const [confirmReq, setConfirmReq] = useState<ConfirmRequest | null>(null)
   const scrollRef = useRef<HTMLDivElement>(null)
 
   useEffect(() => {
     refresh()
   }, [refresh])
+
+  // 监听工具确认请求（write_file 覆盖等）—— 全局，整个组件生命周期
+  useEffect(() => {
+    return on('chat:confirm_request', (...args) => {
+      const ev = args[0] as ConfirmRequest
+      setConfirmReq(ev)
+    })
+  }, [])
+
+  const respondConfirm = (approved: boolean) => {
+    if (confirmReq) {
+      send('chat:confirm_response', { reqId: confirmReq.reqId, approved })
+      setConfirmReq(null)
+    }
+  }
 
   // 默认选中第一个启用的 provider
   useEffect(() => {
@@ -215,6 +232,17 @@ export function ChatPage() {
           )}
         </div>
       </div>
+
+      {/* 工具确认弹窗（write_file 覆盖等） */}
+      <ConfirmDialog
+        open={confirmReq !== null}
+        title="AI 请求确认"
+        prompt={confirmReq?.prompt ?? ''}
+        confirmText="允许"
+        cancelText="拒绝"
+        onConfirm={() => respondConfirm(true)}
+        onCancel={() => respondConfirm(false)}
+      />
     </div>
   )
 }

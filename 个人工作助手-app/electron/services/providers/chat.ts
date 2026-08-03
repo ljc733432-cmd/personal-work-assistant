@@ -23,6 +23,8 @@ interface RunOptions extends ChatRequest {
   onToolCall?: (name: string, args: string) => void
   /** 首字到达回调，传首字延迟毫秒数（诊断"回复慢"用）。 */
   onFirstToken?: (elapsedMs: number) => void
+  /** 工具需要用户确认时（如 write_file 覆盖）的回调，返回用户是否同意。 */
+  onConfirm?: (prompt: string) => Promise<boolean>
 }
 
 /** 把内部 ChatMessage[] 转成 OpenAI SDK 期望的格式。 */
@@ -47,7 +49,7 @@ function findTool(tools: ToolRegistration[] | undefined, name: string) {
 }
 
 export async function chatWithProvider(opts: RunOptions): Promise<void> {
-  const { client, model, messages, tools, onToken, onToolCall, onFirstToken, signal } = opts
+  const { client, model, messages, tools, onToken, onToolCall, onFirstToken, onConfirm, signal } = opts
 
   // 累积 messages，工具结果会追加进去
   const working: OpenAI.Chat.ChatCompletionMessageParam[] = toOpenAIMessages(messages)
@@ -132,7 +134,24 @@ export async function chatWithProvider(opts: RunOptions): Promise<void> {
         }
         try {
           const r = await tool.handler(parsed)
-          resultStr = typeof r === 'string' ? r : JSON.stringify(r)
+          // 规范化：handler 可返回 string 或 ToolHandlerResult
+          if (typeof r === 'string') {
+            resultStr = r
+          } else if (r.kind === 'result') {
+            resultStr = r.value
+          } else {
+            // confirm 类型：挂起等用户确认
+            if (!onConfirm) {
+              resultStr = JSON.stringify({ error: '该操作需要确认，但当前不支持确认流程，已取消' })
+            } else {
+              const approved = await onConfirm(r.prompt)
+              if (approved) {
+                resultStr = await r.action()
+              } else {
+                resultStr = JSON.stringify({ cancelled: true, message: '用户取消了该操作' })
+              }
+            }
+          }
         } catch (e) {
           resultStr = JSON.stringify({ error: String(e) })
         }
