@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useState } from 'react'
+import { Check, Plus } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
@@ -235,11 +236,7 @@ function TaskCard({
                 done ? 'border-green-500 bg-green-500 text-white' : 'border-muted-foreground/40 hover:border-primary'
               }`}
             >
-              {done && (
-                <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3">
-                  <path d="M20 6L9 17l-5-5" />
-                </svg>
-              )}
+              {done && <Check size={12} strokeWidth={3} />}
             </button>
             <div className="space-y-1">
               <div className={`font-medium ${done ? 'line-through' : ''}`}>{task.title}</div>
@@ -282,8 +279,8 @@ function AddTaskCard({ onAdd }: { onAdd: (input: TaskInput) => void }) {
 
   if (!open) {
     return (
-      <Button variant="outline" className="w-full border-dashed" onClick={() => setOpen(true)}>
-        + 添加任务
+      <Button variant="outline" className="w-full gap-1.5 border-dashed" onClick={() => setOpen(true)}>
+        <Plus size={14} strokeWidth={2} /> 添加任务
       </Button>
     )
   }

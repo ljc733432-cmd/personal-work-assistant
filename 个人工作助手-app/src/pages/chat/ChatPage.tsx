@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from 'react'
+import { Sparkles, MessageSquare, User, Bot, Loader2 } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Textarea } from '@/components/ui/textarea'
 import { Card } from '@/components/ui/card'
@@ -347,7 +348,17 @@ export function ChatPage() {
           className="ml-auto h-8 gap-1 text-xs"
           title="从对话中识别任务草稿"
         >
-          {extracting ? '抽取中…' : '✨ 抽取任务'}
+          {extracting ? (
+            <>
+              <Loader2 size={14} className="animate-spin" />
+              抽取中…
+            </>
+          ) : (
+            <>
+              <Sparkles size={14} />
+              抽取任务
+            </>
+          )}
         </Button>
         {streaming && (
           <span className="animate-pulse text-xs text-muted-foreground">
@@ -361,8 +372,8 @@ export function ChatPage() {
         <div className="mx-auto max-w-3xl space-y-5">
           {messages.length === 0 && (
             <div className="mt-12 space-y-3 text-center">
-              <div className="mx-auto flex h-14 w-14 items-center justify-center rounded-2xl bg-primary/10 text-2xl">
-                💬
+              <div className="mx-auto flex h-14 w-14 items-center justify-center rounded-2xl bg-primary/10 text-primary/60">
+                <MessageSquare size={28} strokeWidth={2} />
               </div>
               <div>
                 <p className="text-base font-medium text-foreground">开始对话</p>
@@ -455,11 +466,11 @@ function MessageBubble({ msg }: { msg: ChatMessage }) {
     <div className={`flex gap-2.5 ${isUser ? 'flex-row-reverse' : 'flex-row'}`}>
       {/* 头像 */}
       <div
-        className={`mt-0.5 flex h-7 w-7 flex-shrink-0 items-center justify-center rounded-full text-xs font-medium ${
+        className={`mt-0.5 flex h-7 w-7 flex-shrink-0 items-center justify-center rounded-full ${
           isUser ? 'bg-primary text-primary-foreground' : 'bg-muted text-muted-foreground'
         }`}
       >
-        {isUser ? '我' : 'AI'}
+        {isUser ? <User size={16} strokeWidth={2} /> : <Bot size={16} strokeWidth={2} />}
       </div>
 
       {/* 内容区 */}

@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'react'
+import { MessageSquare, CheckSquare, Settings, StickyNote, Wrench } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import { on } from '@/lib/ipc'
 import { useChatStore } from '@/stores/chat'
@@ -6,7 +7,10 @@ import { ChatPage } from '@/pages/chat/ChatPage'
 import { SettingsPage } from '@/pages/settings/SettingsPage'
 import { TasksPage } from '@/pages/tasks/TasksPage'
 
-type Tab = 'chat' | 'tasks' | 'settings'
+// v1.2：导航从 3 项扩到 5 项（对话/任务/笔记/工具/设置）。
+// 笔记页与工具页（M12.5~M12.9）暂未实现，先占位渲染空状态，
+// 后续里程碑填充。主题切换按钮（底部 Sun/Moon）随 M12.4 主题 store 一起加。
+type Tab = 'chat' | 'tasks' | 'notes' | 'tools' | 'settings'
 
 function App() {
   const [tab, setTab] = useState<Tab>('chat')
@@ -23,34 +27,56 @@ function App() {
 
   return (
     <div className="flex h-screen w-screen overflow-hidden bg-background">
-      {/* 侧栏 */}
-      <nav className="flex w-16 flex-col items-center gap-2 border-r bg-card py-4">
+      {/* 侧栏：64px 纯图标，hairline 分隔分组（PRD §12.3）*/}
+      <nav className="flex w-16 flex-col items-center gap-1 border-r bg-card py-4">
         <NavBtn active={tab === 'chat'} onClick={() => setTab('chat')} label="对话">
-          <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-            <path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z" />
-          </svg>
+          <MessageSquare size={20} strokeWidth={2} />
         </NavBtn>
         <NavBtn active={tab === 'tasks'} onClick={() => setTab('tasks')} label="任务">
-          <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-            <path d="M9 11l3 3L22 4" />
-            <path d="M21 12v7a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11" />
-          </svg>
+          <CheckSquare size={20} strokeWidth={2} />
         </NavBtn>
+        <NavBtn active={tab === 'notes'} onClick={() => setTab('notes')} label="笔记">
+          <StickyNote size={20} strokeWidth={2} />
+        </NavBtn>
+        <NavBtn active={tab === 'tools'} onClick={() => setTab('tools')} label="工具">
+          <Wrench size={20} strokeWidth={2} />
+        </NavBtn>
+
+        {/* 分组分隔（hairline）+ 设置 */}
+        <div className="my-2 h-px w-6 bg-border" />
         <NavBtn active={tab === 'settings'} onClick={() => setTab('settings')} label="设置">
-          <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-            <circle cx="12" cy="12" r="3" />
-            <path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z" />
-          </svg>
+          <Settings size={20} strokeWidth={2} />
         </NavBtn>
+
         <div className="mt-auto px-2 text-center text-[10px] leading-tight text-muted-foreground">
-          <div>v0.1</div>
+          <div>v1.2</div>
         </div>
       </nav>
 
       {/* 主区 */}
       <main className="flex-1 overflow-hidden">
-        {tab === 'chat' ? <ChatPage /> : tab === 'tasks' ? <TasksPage /> : <SettingsPage />}
+        {tab === 'chat' ? (
+          <ChatPage />
+        ) : tab === 'tasks' ? (
+          <TasksPage />
+        ) : tab === 'notes' ? (
+          <PlaceholderPage label="笔记" hint="M12.7~M12.8 实现" />
+        ) : tab === 'tools' ? (
+          <PlaceholderPage label="工具" hint="M12.5~M12.9 实现" />
+        ) : (
+          <SettingsPage />
+        )}
       </main>
+    </div>
+  )
+}
+
+/** 笔记/工具页占位（后续里程碑替换为真实页面）。 */
+function PlaceholderPage({ label, hint }: { label: string; hint: string }) {
+  return (
+    <div className="flex h-full flex-col items-center justify-center gap-2 text-muted-foreground">
+      <div className="text-lg font-medium text-foreground">{label}</div>
+      <div className="text-sm">{hint}</div>
     </div>
   )
 }

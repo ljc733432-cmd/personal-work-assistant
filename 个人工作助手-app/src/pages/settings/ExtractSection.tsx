@@ -84,7 +84,7 @@ export function ExtractSection() {
           />
           <span>自动抽取</span>
           <span className="text-xs text-muted-foreground">
-            （开：每轮对话结束后自动抽取草稿；关：仅手动点 ✨ 抽取）
+            （开：每轮对话结束后自动抽取草稿；关：仅手动点「抽取任务」按钮）
           </span>
         </label>
         {autoExtract && !extractProviderId && (

@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from 'react'
+import { Plus, X, Loader2 } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { useChatStore } from '@/stores/chat'
 import type { Conversation } from '@/types'
@@ -79,7 +80,7 @@ export function ConversationList() {
       {/* 顶部：新建 */}
       <div className="border-b p-2">
         <Button onClick={handleNew} variant="outline" className="w-full justify-start gap-1.5">
-          <span className="text-base leading-none">+</span> 新会话
+          <Plus size={14} strokeWidth={2} /> 新会话
         </Button>
       </div>
 
@@ -119,9 +120,9 @@ export function ConversationList() {
                 ) : (
                   <>
                     <div className="flex items-center gap-1.5">
-                      {/* 流式中指示器：该会话后台还在回复时显示 */}
+                      {/* 流式中指示器：该会话后台还在回复时显示（Loader2 旋转） */}
                       {metaByConv[conv.id]?.streaming && (
-                        <span className="h-1.5 w-1.5 flex-shrink-0 animate-pulse rounded-full bg-blue-500" />
+                        <Loader2 size={12} strokeWidth={2} className="flex-shrink-0 animate-spin text-accent" />
                       )}
                       <div className="truncate text-sm font-medium text-foreground">
                         {conv.title}
@@ -139,7 +140,7 @@ export function ConversationList() {
                       title="删除会话"
                       className="absolute right-1.5 top-1.5 hidden h-5 w-5 items-center justify-center rounded text-muted-foreground hover:bg-destructive/10 hover:text-destructive group-hover:flex"
                     >
-                      ×
+                      <X size={14} strokeWidth={2} />
                     </button>
                   </>
                 )}

@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'react'
+import { Plus } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
@@ -202,8 +203,8 @@ function AddProviderCard({ onAdd }: { onAdd: (input: ProviderInput) => void }) {
 
   if (!open) {
     return (
-      <Button variant="outline" className="w-full border-dashed" onClick={() => setOpen(true)}>
-        + 添加模型 Provider
+      <Button variant="outline" className="w-full gap-1.5 border-dashed" onClick={() => setOpen(true)}>
+        <Plus size={14} strokeWidth={2} /> 添加模型 Provider
       </Button>
     )
   }
