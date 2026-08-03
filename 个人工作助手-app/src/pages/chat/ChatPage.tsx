@@ -6,7 +6,7 @@ import { Markdown } from '@/components/Markdown'
 import { ConfirmDialog } from '@/components/ui/dialog'
 import { useProvidersStore } from '@/stores/providers'
 import { invoke, on, send } from '@/lib/ipc'
-import type { ChatMessage, ConfirmRequest, ToolCallInfo } from '@/types'
+import type { ChatMessage, ConfirmRequest } from '@/types'
 
 let _seq = 0
 const genId = () => `m${Date.now()}_${_seq++}`
@@ -265,8 +265,24 @@ function MessageBubble({ msg }: { msg: ChatMessage }) {
 
       {/* 内容区 */}
       <div className={`flex max-w-[80%] flex-col gap-1.5 ${isUser ? 'items-end' : 'items-start'}`}>
-        {/* 工具调用：默认折叠成一个细标签，点开看详情 */}
-        {hasTools && <ToolCallsCollapse toolCalls={msg.toolCalls!} align={isUser ? 'end' : 'start'} />}
+        {/* 工具调用：紧凑单行显示，不折叠（路径等信息要可见） */}
+        {hasTools && (
+          <div className="flex flex-wrap gap-1">
+            {msg.toolCalls!.map((tc, i) => (
+              <div
+                key={i}
+                className="inline-flex items-center gap-1 rounded border border-border bg-muted/40 px-1.5 py-0.5 text-[11px] text-muted-foreground"
+              >
+                <span className="font-medium text-foreground/80">{tc.name}</span>
+                {tc.args && tc.args !== '{}' && (
+                  <span className="max-w-[320px] truncate font-mono text-[10px] opacity-70" title={tc.args}>
+                    {tc.args}
+                  </span>
+                )}
+              </div>
+            ))}
+          </div>
+        )}
 
         {/* 消息气泡 */}
         {(hasContent || msg.streaming) && (
@@ -297,49 +313,3 @@ function MessageBubble({ msg }: { msg: ChatMessage }) {
   )
 }
 
-/** 工具调用折叠组件：默认收起成一个细标签，点开看每个调用的详情。 */
-function ToolCallsCollapse({
-  toolCalls,
-  align,
-}: {
-  toolCalls: ToolCallInfo[]
-  align: 'start' | 'end'
-}) {
-  const [open, setOpen] = useState(false)
-  const count = toolCalls.length
-  // 名字汇总（去重），如 "list_files · read_file"
-  const names = [...new Set(toolCalls.map((t) => t.name))].join(' · ')
-
-  return (
-    <div className={`flex flex-col gap-1 ${align === 'end' ? 'items-end' : 'items-start'}`}>
-      <button
-        onClick={() => setOpen((v) => !v)}
-        className="inline-flex items-center gap-1 rounded text-[11px] text-muted-foreground transition-colors hover:text-foreground"
-        title={open ? '收起' : '展开详情'}
-      >
-        <span className="text-[10px]">{open ? '▾' : '▸'}</span>
-        <span>
-          🔧 {count} 个工具调用
-          <span className="ml-1 opacity-70">({names})</span>
-        </span>
-      </button>
-      {open && (
-        <div className="flex flex-col gap-1">
-          {toolCalls.map((tc, i) => (
-            <div
-              key={i}
-              className="inline-flex items-center gap-1.5 rounded border border-border bg-muted/40 px-2 py-0.5 text-[11px] text-muted-foreground"
-            >
-              <span className="font-medium text-foreground/80">{tc.name}</span>
-              {tc.args && tc.args !== '{}' && (
-                <span className="max-w-[280px] truncate font-mono text-[10px] opacity-70" title={tc.args}>
-                  {tc.args}
-                </span>
-              )}
-            </div>
-          ))}
-        </div>
-      )}
-    </div>
-  )
-}

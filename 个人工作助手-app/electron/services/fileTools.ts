@@ -297,7 +297,12 @@ export async function findFiles(params: FindParams, sources: AccessibleDir[]): P
   return JSON.stringify({
     count: results.length,
     truncated: results.length >= MAX_FIND_RESULTS,
+    searchedDirs: roots.map((d) => ({ label: d.label, path: d.path })),
     results,
+    hint:
+      results.length === 0
+        ? `没找到匹配文件。已搜索以上目录。如果文件在其他位置（如项目文件夹、其他盘符），请让用户给出完整路径，或在对话里指定目录——首次访问新目录会请求用户授权。`
+        : undefined,
   })
 }
 
