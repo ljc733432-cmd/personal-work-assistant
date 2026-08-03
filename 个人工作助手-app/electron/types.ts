@@ -189,6 +189,24 @@ export interface ReminderInput {
   source?: ReminderSource // 工具页调用默认 manual；FC 工具传 from_chat
 }
 
+// ---------- PomodoroSession：番茄钟历史（M12.6 v1.2 工具扩展） ----------
+// 纯 B 轨：前端计时器跑完，落一条历史。taskId 可关联任务（v2 数据看板用）。
+export interface PomodoroSession {
+  id: string
+  startedAt: number // Unix 秒
+  durationMin: number
+  taskId: string | null
+  completed: boolean
+}
+
+/** pomodoro:record 入参（计时结束后落库）。 */
+export interface PomodoroRecordInput {
+  startedAt: number
+  durationMin: number
+  taskId?: string | null
+  completed?: boolean
+}
+
 export interface ConversationInput {
   id?: string
   title?: string // 可空：首次创建可由首条消息回填

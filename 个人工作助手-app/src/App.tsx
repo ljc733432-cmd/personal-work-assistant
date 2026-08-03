@@ -4,6 +4,7 @@ import { cn } from '@/lib/utils'
 import { on } from '@/lib/ipc'
 import { useChatStore } from '@/stores/chat'
 import { useThemeStore, startSystemThemeWatcher } from '@/stores/theme'
+import { PomodoroWidget } from '@/components/PomodoroWidget'
 import { ChatPage } from '@/pages/chat/ChatPage'
 import { SettingsPage } from '@/pages/settings/SettingsPage'
 import { TasksPage } from '@/pages/tasks/TasksPage'
@@ -59,6 +60,11 @@ function App() {
         <NavBtn active={tab === 'settings'} onClick={() => setTab('settings')} label="设置">
           <Settings size={20} strokeWidth={2} />
         </NavBtn>
+
+        {/* M12.6 番茄钟常驻小部件（PRD §12.3）*/}
+        <div className="mt-2 mb-2">
+          <PomodoroWidget />
+        </div>
 
         {/* 底部主题切换：light/dark 间切换（system 在设置页选） */}
         <button

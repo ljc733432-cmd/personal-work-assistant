@@ -174,6 +174,22 @@ export interface ReminderInput {
   source?: ReminderSource
 }
 
+// ---------- PomodoroSession：番茄钟历史（M12.6 v1.2 工具扩展） ----------
+export interface PomodoroSession {
+  id: string
+  startedAt: number
+  durationMin: number
+  taskId: string | null
+  completed: boolean
+}
+
+export interface PomodoroRecordInput {
+  startedAt: number
+  durationMin: number
+  taskId?: string | null
+  completed?: boolean
+}
+
 // ---------- TaskDraft：任务抽取草稿（M4） ----------
 // AI 从对话抽出的任务草稿，不直接入库，用户点"加入任务"才落库。
 export interface TaskDraft {

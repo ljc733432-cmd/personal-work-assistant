@@ -37,6 +37,8 @@ const ALLOWED_INVOKE = [
   'reminder:list',          // 列提醒（M12.5 v1.2）
   'reminder:upsert',        // 新增/更新提醒
   'reminder:delete',        // 删除提醒
+  'pomodoro:record',        // 记录一次番茄钟（M12.6 v1.2）
+  'pomodoro:list',          // 列番茄钟历史
   'conversation:list',      // 列会话（侧栏，M2）
   'conversation:create',    // 新建会话
   'conversation:rename',    // 重命名会话

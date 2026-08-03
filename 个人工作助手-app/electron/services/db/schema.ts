@@ -168,3 +168,18 @@ export const reminders = sqliteTable('reminders', {
 
 export type ReminderRow = typeof reminders.$inferSelect
 export type ReminderInsert = typeof reminders.$inferInsert
+
+// ---------- PomodoroSession：番茄钟历史（M12.6 v1.2 工具扩展） ----------
+// 见 PRD §13.2 工具 2 + §13.4。番茄钟纯 B 轨（前端计时），完成后落一条历史。
+// taskId 可关联任务（用于 v2「今天专注了多少」），v1.2 暂不强制。
+// completed：是否完整完成（未中断）；中断不落库或落 completed=false（前端决定）。
+export const pomodoroSessions = sqliteTable('pomodoro_sessions', {
+  id: text('id').primaryKey(),
+  startedAt: integer('started_at', { mode: 'number' }).notNull(), // Unix 秒
+  durationMin: integer('duration_min', { mode: 'number' }).notNull(), // 时长（默认 25）
+  taskId: text('task_id'), // 关联任务，可空
+  completed: integer('completed', { mode: 'boolean' }).notNull().default(true),
+})
+
+export type PomodoroSessionRow = typeof pomodoroSessions.$inferSelect
+export type PomodoroSessionInsert = typeof pomodoroSessions.$inferInsert

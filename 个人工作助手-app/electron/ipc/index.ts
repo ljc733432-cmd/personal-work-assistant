@@ -1,7 +1,7 @@
 import { ipcMain, BrowserWindow } from 'electron'
 import { randomUUID } from 'node:crypto'
 import path from 'node:path'
-import { eq } from 'drizzle-orm'
+import { eq, desc } from 'drizzle-orm'
 import { getDb, dbHealthCheck } from '../services/db'
 import {
   providers,
@@ -12,6 +12,7 @@ import {
   conversations,
   messages,
   reminders,
+  pomodoroSessions,
 } from '../services/db/schema'
 import { setSecret, getSecret, deleteSecret } from '../services/secret'
 import {
@@ -52,6 +53,8 @@ import type {
   TaskDraftInput,
   Reminder,
   ReminderInput,
+  PomodoroSession,
+  PomodoroRecordInput,
   Conversation,
   ConversationInput,
   ConversationMessage,
@@ -795,6 +798,59 @@ function registerReminderHandlers() {
   })
 }
 
+// ---------- Pomodoro handlers（M12.6 v1.2 番茄钟，纯 B 轨） ----------
+// 前端计时器跑完，落一条历史。list 供 v2 数据看板用（v1.2 不强求展示）。
+function registerPomodoroHandlers() {
+  // 记录一次番茄钟（完成后调）
+  ipcMain.handle('pomodoro:record', (_, input: PomodoroRecordInput): IpcResult<PomodoroSession> => {
+    try {
+      const db = getDb()
+      const id = randomUUID()
+      db.insert(pomodoroSessions)
+        .values({
+          id,
+          startedAt: input.startedAt,
+          durationMin: input.durationMin,
+          taskId: input.taskId ?? null,
+          completed: input.completed ?? true,
+        })
+        .run()
+      const row = db.select().from(pomodoroSessions).where(eq(pomodoroSessions.id, id)).get()!
+      return ok({
+        id: row.id,
+        startedAt: row.startedAt,
+        durationMin: row.durationMin,
+        taskId: row.taskId,
+        completed: row.completed,
+      })
+    } catch (e) {
+      return err(String(e))
+    }
+  })
+
+  // 列历史（按开始时间倒序，v2 数据看板用）
+  ipcMain.handle('pomodoro:list', (): IpcResult<PomodoroSession[]> => {
+    try {
+      const rows = getDb()
+        .select()
+        .from(pomodoroSessions)
+        .orderBy(desc(pomodoroSessions.startedAt))
+        .all()
+      return ok(
+        rows.map((r) => ({
+          id: r.id,
+          startedAt: r.startedAt,
+          durationMin: r.durationMin,
+          taskId: r.taskId,
+          completed: r.completed,
+        })),
+      )
+    } catch (e) {
+      return err(String(e))
+    }
+  })
+}
+
 function registerDbHandlers() {
   ipcMain.handle('db:health', (): IpcResult<{ ok: boolean; dbPath: string; detail: string }> => {
     return ok(dbHealthCheck())
@@ -946,6 +1002,7 @@ export function registerIpcHandlers() {
   registerWorkDirHandlers()
   registerTaskHandlers()
   registerReminderHandlers()
+  registerPomodoroHandlers()
   registerConversationHandlers()
   registerDbHandlers()
   registerMetaHandlers()

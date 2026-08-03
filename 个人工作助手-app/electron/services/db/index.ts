@@ -113,6 +113,15 @@ CREATE TABLE IF NOT EXISTS reminders (
   created_at  INTEGER NOT NULL DEFAULT (unixepoch())
 );
 CREATE INDEX IF NOT EXISTS idx_reminders_pending ON reminders(done, time);
+
+-- M12.6：番茄钟历史（v1.2 工具扩展，纯 B 轨）
+CREATE TABLE IF NOT EXISTS pomodoro_sessions (
+  id            TEXT PRIMARY KEY,
+  started_at    INTEGER NOT NULL,           -- Unix 秒
+  duration_min  INTEGER NOT NULL,           -- 时长（默认 25）
+  task_id       TEXT,                       -- 关联任务，可空
+  completed     INTEGER NOT NULL DEFAULT 1  -- 1=完整完成 0=中断
+);
 `
 
 export function getDb(): BetterSQLite3Database<typeof schema> {
