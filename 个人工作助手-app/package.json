@@ -17,6 +17,7 @@
     "db:studio": "drizzle-kit studio"
   },
   "dependencies": {
+    "@fontsource/inter": "^5.3.0",
     "better-sqlite3": "^13.0.2",
     "drizzle-orm": "^0.36.4",
     "highlight.js": "^11.11.1",
