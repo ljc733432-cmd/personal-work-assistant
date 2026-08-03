@@ -110,8 +110,11 @@ function FilterBtn({ active, onClick, label }: { active: boolean; onClick: () =>
   return (
     <button
       onClick={onClick}
-      className={`rounded-full px-3 py-1 text-xs font-medium transition-colors ${
-        active ? 'bg-primary text-primary-foreground' : 'bg-muted text-muted-foreground hover:bg-accent'
+      // v1.3：选中态改 Soft UI（accent 微背景 + 阴影浮起，替代 v1.2 近黑硬反差）
+      className={`rounded-full px-3 py-1 text-xs font-medium transition-all duration-200 ${
+        active
+          ? 'bg-accent/10 text-accent shadow-xs'
+          : 'bg-surface-3 text-muted-foreground hover:bg-accent/5 hover:text-foreground'
       }`}
     >
       {label}
