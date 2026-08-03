@@ -37,13 +37,14 @@ export function SettingsPage() {
   }
 
   return (
-    <div className="mx-auto max-w-3xl space-y-6 p-6">
-      <div>
-        <h1 className="text-2xl font-semibold">设置</h1>
-        <p className="mt-1 text-sm text-muted-foreground">
-          配置模型 Provider。API Key 经操作系统级 safeStorage 加密保存，不明文落库。
-        </p>
-      </div>
+    <div className="h-full overflow-y-auto">
+      <div className="mx-auto max-w-3xl space-y-6 p-6">
+        <div>
+          <h1 className="text-2xl font-semibold">设置</h1>
+          <p className="mt-1 text-sm text-muted-foreground">
+            配置模型 Provider。API Key 经操作系统级 safeStorage 加密保存，不明文落库。
+          </p>
+        </div>
 
       {providers.length === 0 && (
         <Card className="border-dashed">
@@ -67,8 +68,9 @@ export function SettingsPage() {
 
       <AddProviderCard onAdd={(input) => upsert(input)} />
 
-      <div className="!mt-10 border-t pt-2">
-        <WorkDirSection />
+        <div className="!mt-10 border-t pt-2">
+          <WorkDirSection />
+        </div>
       </div>
     </div>
   )
