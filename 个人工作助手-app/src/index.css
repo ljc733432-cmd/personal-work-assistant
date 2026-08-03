@@ -143,6 +143,21 @@
 /* highlight.js 主题（浅色）。深色主题切换时 hljs 类名可后置处理，v1.2 先保持 github.css。 */
 @import 'highlight.js/styles/github.css';
 
+/* ===== v1.3 Soft UI 阴影 + 字体：自定义 utilities 覆盖 =====
+   Tailwind v4 内置 shadow-* 用 --tw-shadow 内部变量，@theme 覆盖 --shadow-* 不生效。
+   这里用 @layer utilities 直接写 box-shadow，绕过其机制，让 shadow-sm/md 类名产出 Soft UI 阴影。
+   浅深主题用 CSS 变量 --soft-shadow-*（:root/.dark 定义）切换。 */
+@layer utilities {
+  .shadow-xs { box-shadow: var(--soft-shadow-xs); }
+  .shadow-sm { box-shadow: var(--soft-shadow-sm); }
+  .shadow-md { box-shadow: var(--soft-shadow-md); }
+  .shadow-lg { box-shadow: var(--soft-shadow-lg); }
+  /* hover 变体（shadow-sm + hover:shadow-md 场景）*/
+  .hover\:shadow-md:hover { box-shadow: var(--soft-shadow-md); }
+  /* 字体：font-display 工具类（Tailwind 只内置 sans/serif/mono，需自定义）*/
+  .font-display { font-family: var(--font-display); }
+}
+
 /* ===== v1.3 动效：流式 typing 三圆点 + 列表 stagger 入场 ===== */
 /* skill 推荐的 typing indicator：三圆点错峰 pulse，比竖条光标更现代 */
 @keyframes typing-dot {

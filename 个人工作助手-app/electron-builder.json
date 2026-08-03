@@ -5,7 +5,8 @@
   "asar": true,
   "asarUnpack": [
     "**/node_modules/better-sqlite3/**",
-    "**/node_modules/better-sqlite3/build/Release/*.node"
+    "**/node_modules/better-sqlite3/build/Release/*.node",
+    "**/build/icon.*"
   ],
   "directories": {
     "output": "release/${version}",
@@ -14,7 +15,9 @@
   "files": [
     "dist-electron",
     "dist",
-    "package.json"
+    "package.json",
+    "build/icon.ico",
+    "build/icon.png"
   ],
   "win": {
     "target": [

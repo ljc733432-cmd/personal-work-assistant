@@ -101,7 +101,9 @@ export function ConversationList() {
                 onClick={() => !isEditing && switchConversation(conv.id)}
                 onDoubleClick={() => startRename(conv)}
                 className={`group relative cursor-pointer rounded-md px-2.5 py-2 transition-colors ${
-                  isActive ? 'bg-accent' : 'hover:bg-accent/50'
+                  isActive
+                    ? 'bg-accent/10 text-accent'
+                    : 'hover:bg-surface-3'
                 }`}
               >
                 {isEditing ? (

@@ -128,7 +128,9 @@ export function NotesPage() {
                   onClick={() => setActiveId(n.id)}
                   className={cn(
                     'block w-full rounded-md px-2.5 py-2 text-left transition-colors',
-                    n.id === activeId ? 'bg-accent' : 'hover:bg-accent/50',
+                    n.id === activeId
+                      ? 'bg-accent/10 text-accent'
+                      : 'hover:bg-surface-3',
                   )}
                 >
                   <div className="truncate text-sm font-medium text-foreground">{n.title}</div>
