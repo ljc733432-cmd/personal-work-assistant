@@ -216,6 +216,24 @@ export interface NoteSearchHit {
   updatedAt: number
 }
 
+// ---------- Document Converter（M12.9 v1.2 工具扩展） ----------
+export type ConvertTarget = 'md' | 'txt' | 'html' | 'docx' | 'pdf'
+
+export interface ConvertParams {
+  inputPath: string
+  targetFormat: ConvertTarget
+  outputPath?: string
+}
+
+export interface ConvertResultData {
+  ok: boolean
+  outputPath: string
+  inputFormat: string
+  targetFormat: ConvertTarget
+  bytes: number
+  error?: string
+}
+
 // ---------- TaskDraft：任务抽取草稿（M4） ----------
 // AI 从对话抽出的任务草稿，不直接入库，用户点"加入任务"才落库。
 export interface TaskDraft {

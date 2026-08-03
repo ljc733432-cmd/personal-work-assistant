@@ -47,6 +47,9 @@ const ALLOWED_INVOKE = [
   'note:search',            // 全文搜笔记
   'note:getDir',            // 读笔记库目录
   'note:setDir',            // 设笔记库目录
+  'convert:targets',        // 查转换支持的目标格式（M12.9 v1.2）
+  'convert:run',            // 执行文档转换
+  'convert:pickFile',       // 选输入文件（dialog）
   'conversation:list',      // 列会话（侧栏，M2）
   'conversation:create',    // 新建会话
   'conversation:rename',    // 重命名会话

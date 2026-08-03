@@ -234,6 +234,25 @@ export interface NoteSearchHit {
   updatedAt: number
 }
 
+// ---------- Document Converter（M12.9 v1.2 工具扩展） ----------
+// 见 PRD §13.2 工具 3 + §15.5。
+export type ConvertTarget = 'md' | 'txt' | 'html' | 'docx' | 'pdf'
+
+export interface ConvertParams {
+  inputPath: string
+  targetFormat: ConvertTarget
+  outputPath?: string
+}
+
+export interface ConvertResultData {
+  ok: boolean
+  outputPath: string
+  inputFormat: string
+  targetFormat: ConvertTarget
+  bytes: number
+  error?: string
+}
+
 export interface ConversationInput {
   id?: string
   title?: string // 可空：首次创建可由首条消息回填

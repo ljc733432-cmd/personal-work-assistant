@@ -40,6 +40,7 @@ import {
   searchNotes,
 } from '../services/notes/noteStore'
 import { getNotesDir, setNotesDir } from '../services/notes/config'
+import { convertDocument, supportedTargets } from '../services/converter'
 import { chatWithProvider, type ChatResult } from '../services/providers/chat'
 import { truncateByTokenBudget } from '../services/providers/truncate'
 import { extractTasks } from '../services/taskExtractor'
@@ -67,6 +68,9 @@ import type {
   Note,
   NoteInput,
   NoteSearchHit,
+  ConvertParams,
+  ConvertResultData,
+  ConvertTarget,
   Conversation,
   ConversationInput,
   ConversationMessage,
@@ -941,6 +945,53 @@ function registerNoteHandlers() {
   })
 }
 
+// ---------- Document Converter handlers（M12.9 v1.2 工具扩展） ----------
+// 双轨：B 轨工具页拖文件转换 + A 轨 FC convert_document 共享。
+// 安全：路径在 converter 内部经 resolveSafePath（白名单/笔记库）。
+function registerConverterHandlers() {
+  // 查某扩展名支持的目标格式（UI 灰掉不支持的）
+  ipcMain.handle('convert:targets', (_, ext: string): IpcResult<ConvertTarget[]> => {
+    try {
+      return ok(supportedTargets(ext))
+    } catch (e) {
+      return err(String(e))
+    }
+  })
+
+  // 执行转换
+  ipcMain.handle(
+    'convert:run',
+    async (_, params: ConvertParams): Promise<IpcResult<ConvertResultData>> => {
+      try {
+        if (!params.inputPath?.trim()) return err('inputPath 不能为空')
+        const result = await convertDocument(params)
+        return ok(result)
+      } catch (e) {
+        return err(String(e))
+      }
+    },
+  )
+
+  // 选输入文件（dialog.showOpenDialog，B 轨 UI 用）
+  ipcMain.handle('convert:pickFile', async (): Promise<IpcResult<string | null>> => {
+    try {
+      const { dialog } = await import('electron')
+      const win = BrowserWindow.getAllWindows()[0] ?? null
+      const result = await dialog.showOpenDialog(win!, {
+        properties: ['openFile'],
+        filters: [
+          { name: '文档', extensions: ['md', 'txt', 'docx'] },
+          { name: '所有文件', extensions: ['*'] },
+        ],
+      })
+      if (result.canceled || result.filePaths.length === 0) return ok(null)
+      return ok(result.filePaths[0])
+    } catch (e) {
+      return err(String(e))
+    }
+  })
+}
+
 function registerDbHandlers() {
   ipcMain.handle('db:health', (): IpcResult<{ ok: boolean; dbPath: string; detail: string }> => {
     return ok(dbHealthCheck())
@@ -1094,6 +1145,7 @@ export function registerIpcHandlers() {
   registerReminderHandlers()
   registerPomodoroHandlers()
   registerNoteHandlers()
+  registerConverterHandlers()
   registerConversationHandlers()
   registerDbHandlers()
   registerMetaHandlers()

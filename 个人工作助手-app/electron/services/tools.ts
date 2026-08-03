@@ -7,6 +7,7 @@ import {
   getNote,
   updateNote,
 } from './notes/noteStore'
+import { convertDocument } from './converter'
 import {
   listFiles,
   readFileContent,
@@ -494,6 +495,8 @@ export function assembleTools(ctx: ToolContext): ToolRegistration[] {
     makeSearchNotesTool(),
     makeReadNoteTool(),
     makeUpdateNoteTool(),
+    // M12.9：文档转换（A 轨 FC）。无破坏性（原文件不动），不走二次确认。
+    makeConvertDocumentTool(),
   ]
   // M6：跟进会话额外注册任务状态修改工具（走二次确认）
   if (ctx.conversationType === 'followup') {
@@ -727,6 +730,63 @@ function makeUpdateNoteTool(): ToolRegistration {
             message: `笔记「${updated.title}」已更新`,
           })
         },
+      }
+    },
+  }
+}
+
+// ---------- 文档转换（M12.9 v1.2 A 轨 FC） ----------
+// 见 PRD §13.2 工具 3。路径在 converter 内部经 resolveSafePath（白名单/笔记库）。
+// 无破坏性（原文件不动），不走二次确认。
+function makeConvertDocumentTool(): ToolRegistration {
+  return {
+    def: {
+      type: 'function',
+      function: {
+        name: 'convert_document',
+        description:
+          '转换文档格式。支持 md↔txt、md→html/docx/pdf、docx→md/txt/html。' +
+          '当用户说「把这份 md 转成 docx/pdf」时调用。路径须在工作目录或笔记库内。',
+        parameters: {
+          type: 'object',
+          properties: {
+            inputPath: {
+              type: 'string',
+              description: '输入文件绝对路径（须在白名单内，可用 list_accessible_dirs 查）',
+            },
+            targetFormat: {
+              type: 'string',
+              enum: ['md', 'txt', 'html', 'docx', 'pdf'],
+              description: '目标格式',
+            },
+            outputPath: {
+              type: 'string',
+              description: '可选输出路径；缺省输出到输入同目录换扩展名',
+            },
+          },
+          required: ['inputPath', 'targetFormat'],
+        },
+      },
+    },
+    handler: async (args) => {
+      const inputPath = String(args.inputPath ?? '').trim()
+      const targetFormat = String(args.targetFormat ?? '').trim() as 'md' | 'txt' | 'html' | 'docx' | 'pdf'
+      if (!inputPath) return { kind: 'result', value: JSON.stringify({ error: 'inputPath 不能为空' }) }
+      if (!['md', 'txt', 'html', 'docx', 'pdf'].includes(targetFormat)) {
+        return { kind: 'result', value: JSON.stringify({ error: 'targetFormat 非法' }) }
+      }
+      const result = await convertDocument({
+        inputPath,
+        targetFormat,
+        outputPath: args.outputPath ? String(args.outputPath) : undefined,
+      })
+      return {
+        kind: 'result',
+        value: JSON.stringify(
+          result.ok
+            ? { ok: true, outputPath: result.outputPath, bytes: result.bytes, message: `已转换为 ${result.outputPath}` }
+            : { ok: false, error: result.error ?? '转换失败' },
+        ),
       }
     },
   }

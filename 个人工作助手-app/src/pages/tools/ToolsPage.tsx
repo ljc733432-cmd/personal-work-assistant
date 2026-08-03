@@ -2,6 +2,7 @@ import { useState } from 'react'
 import { Bell, Timer, FileText, ArrowLeft } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import { ReminderSection } from './ReminderSection'
+import { ConverterSection } from './ConverterSection'
 
 /**
  * 工具页（M12.5~M12.9 v1.2 工具扩展）。
@@ -20,6 +21,9 @@ export function ToolsPage() {
   if (active === 'reminders') {
     return <ReminderSection onBack={() => setActive(null)} />
   }
+  if (active === 'converter') {
+    return <ConverterSection onBack={() => setActive(null)} />
+  }
 
   return (
     <div className="h-full overflow-y-auto">
@@ -34,8 +38,13 @@ export function ToolsPage() {
             desc="到点通知，区别于任务跟进"
             onClick={() => setActive('reminders')}
           />
-          <ToolCard icon={Timer} title="番茄钟" desc="25 分钟专注计时（顶栏常驻）" />
-          <ToolCard icon={FileText} title="文档转换" desc="Markdown / DOCX / PDF 互转" />
+          <ToolCard icon={Timer} title="番茄钟" desc="25 分钟专注计时（侧栏常驻）" />
+          <ToolCard
+            icon={FileText}
+            title="文档转换"
+            desc="Markdown / DOCX / PDF 互转"
+            onClick={() => setActive('converter')}
+          />
         </div>
       </div>
     </div>
