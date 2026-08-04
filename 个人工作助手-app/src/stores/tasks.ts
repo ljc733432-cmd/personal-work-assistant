@@ -25,6 +25,8 @@ interface TasksState {
   remove: (params: TaskDeleteParams) => Promise<void>
   /** v1.10.1：子任务转根任务（清 parentId）。 */
   promoteSubtask: (id: string) => Promise<void>
+  /** v1.10.5：移动任务到某父任务下（parentId=null 变根任务）。 */
+  setParent: (id: string, parentId: string | null) => Promise<void>
 }
 
 export const useTasksStore = create<TasksState>((set) => ({
@@ -77,6 +79,12 @@ export const useTasksStore = create<TasksState>((set) => ({
 
   promoteSubtask: async (id) => {
     await invoke<true>('task:promote_subtask', id)
+    const list = await invoke<Task[]>('task:list')
+    set({ tasks: list })
+  },
+
+  setParent: async (id, parentId) => {
+    await invoke<true>('task:set_parent', { id, parentId })
     const list = await invoke<Task[]>('task:list')
     set({ tasks: list })
   },

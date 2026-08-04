@@ -36,7 +36,7 @@ const PRIORITY_STYLE: Record<TaskPriority, string> = {
 type Filter = 'all' | TaskStatus
 
 export function TasksPage() {
-  const { tasks, refresh, upsert, remove, createSubtask, promoteSubtask } = useTasksStore()
+  const { tasks, refresh, upsert, remove, createSubtask, promoteSubtask, setParent } = useTasksStore()
   const [filter, setFilter] = useState<Filter>('all')
   const [editingId, setEditingId] = useState<string | null>(null)
 
@@ -136,6 +136,7 @@ export function TasksPage() {
               key={t.id}
               task={t}
               subtasks={subtasksByParent.get(t.id) ?? EMPTY_TASKS}
+              allRootTasks={rootTasks}
               editing={editingId === t.id}
               onEdit={() => setEditingId(editingId === t.id ? null : t.id)}
               onSave={(input) => {
@@ -153,6 +154,7 @@ export function TasksPage() {
               onDeleteSubtask={(sub) => remove({ id: sub.id })}
               onPromoteSubtask={(sub) => promoteSubtask(sub.id)}
               onEditSubtask={(sub, title) => upsert({ id: sub.id, title })}
+              onSetParent={(id, parentId) => setParent(id, parentId)}
             />
           ))}
         </div>
@@ -203,6 +205,7 @@ function PriorityBadge({ priority }: { priority: TaskPriority }) {
 function TaskCard({
   task,
   subtasks,
+  allRootTasks,
   editing,
   onEdit,
   onSave,
@@ -213,9 +216,11 @@ function TaskCard({
   onDeleteSubtask,
   onPromoteSubtask,
   onEditSubtask,
+  onSetParent,
 }: {
   task: Task
   subtasks: Task[]
+  allRootTasks: Task[]
   editing: boolean
   onEdit: () => void
   onSave: (input: TaskInput) => void
@@ -226,6 +231,7 @@ function TaskCard({
   onDeleteSubtask: (sub: Task) => void
   onPromoteSubtask: (sub: Task) => void
   onEditSubtask: (sub: Task, title: string) => void
+  onSetParent: (id: string, parentId: string | null) => void
 }) {
   // 编辑态字段
   const [title, setTitle] = useState(task.title)
@@ -286,6 +292,23 @@ function TaskCard({
               <Label>截止日期</Label>
               <Input type="date" value={dueDate} onChange={(e) => setDueDate(e.target.value)} />
             </div>
+          </div>
+          {/* v1.10.5：移动到（手动调整父子层级，解 AI 提炼不准的问题）*/}
+          <div className="space-y-1.5">
+            <Label>移动到</Label>
+            <SelectInput
+              value={task.parentId ?? ''}
+              onChange={(v) => onSetParent(task.id, v || null)}
+              options={[
+                { value: '', label: '独立（根任务）' },
+                ...allRootTasks
+                  .filter((r) => r.id !== task.id)
+                  .map((r) => ({ value: r.id, label: r.title })),
+              ]}
+            />
+            <p className="text-[10px] text-muted-foreground">
+              选一个根任务作为父任务，本任务变为其子任务；选「独立」变回根任务
+            </p>
           </div>
           <div className="flex items-center gap-2 pt-1">
             <Button
