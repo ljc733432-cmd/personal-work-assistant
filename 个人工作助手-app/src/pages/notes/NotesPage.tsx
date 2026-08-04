@@ -111,10 +111,37 @@ export function NotesPage() {
     }
   }
 
-  // AI 面板「插入到笔记末尾」回调：把结果追加到 draftContent 并落库
-  const handleInsertAi = async (opLabel: string, result: string) => {
+  // AI 面板「插入到笔记末尾」回调。
+  // v1.10.3 去重：
+  //  - todos（提炼待办）：剥标题，只取 - [ ] 行，按标题去重（笔记里已有的不加），
+  //    直接追加到笔记末尾（不包「## AI 生成」标题，避免污染待办区）。
+  //  - 其他操作：原样包标题块追加。
+  const handleInsertAi = async (opLabel: string, result: string, op?: string) => {
     if (!active) return
-    const newContent = `${draftContent}\n\n## AI 生成（${opLabel}）\n\n${result}\n`
+    let appendBlock: string
+    if (op === 'todos') {
+      // 提取结果里的任务行（含缩进子任务），按标题去重
+      const newTaskLines = result
+        .split('\n')
+        .filter((l) => TASK_LINE_RE.test(l))
+        .map((l) => l.trimEnd())
+      const existingTitles = new Set(
+        parseTaskLines(draftContent).map((t) => normalizeTitle(t.text)),
+      )
+      const deduped = newTaskLines.filter((line) => {
+        const m = TASK_LINE_RE.exec(line)
+        if (!m) return true // 容错：非任务行保留（理论上不会进这）
+        return !existingTitles.has(normalizeTitle(m[4].trim()))
+      })
+      if (deduped.length === 0) {
+        setAiPanelOpen(false)
+        return // 全部已存在，不追加
+      }
+      appendBlock = `\n${deduped.join('\n')}\n`
+    } else {
+      appendBlock = `\n\n## AI 生成（${opLabel}）\n\n${result}\n`
+    }
+    const newContent = `${draftContent}${appendBlock}`
     setDraftContent(newContent)
     try {
       await update({
@@ -301,7 +328,7 @@ function NoteAiPanel({
   onClose,
 }: {
   content: string
-  onInsert: (opLabel: string, result: string) => void
+  onInsert: (opLabel: string, result: string, op?: string) => void
   onClose: () => void
 }) {
   const [op, setOp] = useState<NoteAiOp>('summary')
@@ -415,7 +442,7 @@ function NoteAiPanel({
               <Markdown content={result} />
             </div>
             <div className="flex gap-2">
-              <Button size="sm" variant="default" onClick={() => onInsert(opLabel, result)}>
+              <Button size="sm" variant="default" onClick={() => onInsert(opLabel, result, op)}>
                 插入到笔记末尾
               </Button>
               <Button size="sm" variant="outline" onClick={copy}>
@@ -470,28 +497,48 @@ function parseTaskLines(content: string): ParsedTaskLine[] {
   return result
 }
 
-/** 把扁平 ParsedTaskLine 分成父子结构（v1.10.2）。indent=0 是根，其后 indent>0 归属该根。 */
+/** 把扁平 ParsedTaskLine 分成父子结构（v1.10.2）。
+ *  v1.10.3：去重——同层级相同标题只保留第一个（根按全笔记去重，子任务按父内去重）。 */
 interface TodoNode {
   line: ParsedTaskLine
   children: ParsedTaskLine[]
+  /** 内部去重用（不渲染）：记录已添加的子任务归一化标题 */
+  _seenChildTitles: Set<string>
 }
 
 function buildTodoTree(lines: ParsedTaskLine[]): TodoNode[] {
   const roots: TodoNode[] = []
+  const seenRootTitles = new Set<string>()
   let currentRoot: TodoNode | null = null
   for (const line of lines) {
+    const norm = normalizeTitle(line.text)
     if (line.indent === 0) {
-      currentRoot = { line, children: [] }
+      if (seenRootTitles.has(norm)) {
+        // 重复根：其后续子任务也跳过（归到已存在的同名根？不——简单跳过整块）
+        currentRoot = null
+        continue
+      }
+      seenRootTitles.add(norm)
+      currentRoot = { line, children: [], _seenChildTitles: new Set<string>() }
       roots.push(currentRoot)
     } else if (currentRoot) {
+      if (currentRoot._seenChildTitles.has(norm)) continue
+      currentRoot._seenChildTitles.add(norm)
       currentRoot.children.push(line)
     } else {
       // 缩进行无父根（异常），当根处理
-      roots.push({ line, children: [] })
+      if (seenRootTitles.has(norm)) continue
+      seenRootTitles.add(norm)
+      roots.push({ line, children: [], _seenChildTitles: new Set<string>() })
       currentRoot = roots[roots.length - 1]!
     }
   }
   return roots
+}
+
+/** 标题归一化用于去重：去首尾空白 + 转小写 + 折叠连续空白。中文不转大小写（无影响）。 */
+function normalizeTitle(text: string): string {
+  return text.trim().toLowerCase().replace(/\s+/g, ' ')
 }
 
 function NoteTodosPanel({
