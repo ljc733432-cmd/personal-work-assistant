@@ -34,7 +34,7 @@ import type { Note, NoteSearchHit, NoteAiOp, NoteAiResult, Task } from '@/types'
  */
 export function NotesPage() {
   const { notes, refresh, create, update, remove } = useNotesStore()
-  const { tasks, refresh: refreshTasks, createFromNote } = useTasksStore()
+  const { tasks, refresh: refreshTasks, createFromNote, createSubtask } = useTasksStore()
   const [activeId, setActiveId] = useState<string | null>(null)
   const [query, setQuery] = useState('')
   const [hits, setHits] = useState<NoteSearchHit[] | null>(null)
@@ -256,6 +256,7 @@ export function NotesPage() {
                     noteFileName={active.fileName}
                     tasks={tasks}
                     onConvert={createFromNote}
+                    onConvertSub={createSubtask}
                   />
                   {active.content.trim() ? (
                     <Markdown content={active.content} />
@@ -442,17 +443,18 @@ function NoteAiPanel({
   )
 }
 
-// ---------- 笔记待办转任务（v1.9.1 M19，PRD §15.2②） ----------
+// ---------- 笔记待办转任务（v1.9.1 M19 + v1.10.2 子任务层级对齐） ----------
 // GFM 任务列表行正则：前导空格 + 标记(-/*) + [ ]/[x] + 文本
-// 仅解析未勾选项（- [ ]）展示转任务按钮，已勾选（- [x]）不显示（已完成无需转）。
+// v1.10.2：用 indent（前导空格数）识别父子层级——indent=0 根待办，indent>0 子待办。
 const TASK_LINE_RE = /^(\s*)([-*+])\s+\[([ xX])\]\s+(.*)$/
 
 interface ParsedTaskLine {
-  text: string // 任务文本（去尾部空白）
+  text: string
   checked: boolean
+  indent: number // 前导空格数（0=根待办，>0=子待办）
 }
 
-/** 解析笔记内容里的 GFM 任务列表项。返回顺序与原文一致。 */
+/** 解析笔记内容里的 GFM 任务列表项。返回顺序与原文一致（含 indent 用于父子分组）。 */
 function parseTaskLines(content: string): ParsedTaskLine[] {
   const result: ParsedTaskLine[] = []
   for (const line of content.split('\n')) {
@@ -461,10 +463,35 @@ function parseTaskLines(content: string): ParsedTaskLine[] {
       result.push({
         text: m[4].trim(),
         checked: m[3].toLowerCase() === 'x',
+        indent: m[1].length,
       })
     }
   }
   return result
+}
+
+/** 把扁平 ParsedTaskLine 分成父子结构（v1.10.2）。indent=0 是根，其后 indent>0 归属该根。 */
+interface TodoNode {
+  line: ParsedTaskLine
+  children: ParsedTaskLine[]
+}
+
+function buildTodoTree(lines: ParsedTaskLine[]): TodoNode[] {
+  const roots: TodoNode[] = []
+  let currentRoot: TodoNode | null = null
+  for (const line of lines) {
+    if (line.indent === 0) {
+      currentRoot = { line, children: [] }
+      roots.push(currentRoot)
+    } else if (currentRoot) {
+      currentRoot.children.push(line)
+    } else {
+      // 缩进行无父根（异常），当根处理
+      roots.push({ line, children: [] })
+      currentRoot = roots[roots.length - 1]!
+    }
+  }
+  return roots
 }
 
 function NoteTodosPanel({
@@ -473,30 +500,53 @@ function NoteTodosPanel({
   noteFileName,
   tasks,
   onConvert,
+  onConvertSub,
 }: {
   content: string
   noteId: string
   noteFileName: string
   tasks: Task[]
   onConvert: (input: { title: string; noteId: string }) => Promise<Task>
+  onConvertSub: (input: { parentId: string; title: string }) => Promise<Task>
 }) {
-  const [converting, setConverting] = useState<string | null>(null) // 正在转的 title
+  const [converting, setConverting] = useState<string | null>(null) // 正在转的 key（title 或 title>subtitle）
   const [error, setError] = useState<string | null>(null)
-  const todoLines = parseTaskLines(content).filter((l) => !l.checked && l.text)
 
-  // 判断某 title 是否已转（source=from_note + sourceNotePath 匹配 + title 精确匹配）
-  const isConverted = (title: string) =>
-    tasks.some(
-      (t) => t.source === 'from_note' && t.sourceNotePath === noteFileName && t.title === title,
+  const tree = buildTodoTree(parseTaskLines(content).filter((l) => !l.checked && l.text))
+  const totalCount = tree.reduce((sum, n) => sum + 1 + n.children.length, 0)
+
+  // 根待办是否已转（source=from_note + sourceNotePath + title）
+  const findRootTask = (title: string) =>
+    tasks.find(
+      (t) =>
+        t.source === 'from_note' &&
+        t.sourceNotePath === noteFileName &&
+        t.title === title &&
+        t.parentId === null,
     )
+  // 子待办是否已转（parentId 匹配根任务 + title）
+  const findSubTask = (rootTaskId: string, title: string) =>
+    tasks.find((t) => t.parentId === rootTaskId && t.title === title)
 
-  if (todoLines.length === 0) return null // 无未勾选待办，不显示面板
+  if (totalCount === 0) return null
 
-  const handleConvert = async (title: string) => {
+  const handleConvertRoot = async (title: string) => {
     setConverting(title)
     setError(null)
     try {
       await onConvert({ title, noteId })
+    } catch (e) {
+      setError(String(e))
+    } finally {
+      setConverting(null)
+    }
+  }
+  const handleConvertSub = async (rootTaskId: string, title: string) => {
+    const key = `${rootTaskId}>${title}`
+    setConverting(key)
+    setError(null)
+    try {
+      await onConvertSub({ parentId: rootTaskId, title })
     } catch (e) {
       setError(String(e))
     } finally {
@@ -508,42 +558,79 @@ function NoteTodosPanel({
     <div className="mb-4 rounded-md border bg-surface-2 p-3">
       <div className="mb-2 flex items-center gap-1.5 text-xs font-medium text-muted-foreground">
         <CheckSquare size={13} />
-        <span>笔记待办（{todoLines.length}）</span>
-        <span className="text-[10px] text-muted-foreground/70">点「转任务」加入任务列表</span>
+        <span>笔记待办（{totalCount}）</span>
+        <span className="text-[10px] text-muted-foreground/70">点「转任务」加入任务列表（缩进=子任务）</span>
       </div>
       <ul className="space-y-1">
-        {todoLines.map((line, i) => {
-          const converted = isConverted(line.text)
+        {tree.map((node, i) => {
+          const rootTask = findRootTask(node.line.text)
+          const rootConverted = !!rootTask
           return (
-            <li key={i} className="flex items-center gap-2 rounded-md bg-background px-2.5 py-1.5">
-              <span className="flex-1 truncate text-xs">{line.text}</span>
-              {converted ? (
-                <span className="flex items-center gap-0.5 text-[10px] text-muted-foreground">
-                  <CheckCircle2 size={11} /> 已转
-                </span>
-              ) : (
-                <Button
-                  size="sm"
-                  variant="outline"
-                  onClick={() => handleConvert(line.text)}
-                  disabled={converting === line.text}
-                  className="h-6 gap-1 px-2 text-[10px]"
-                >
-                  {converting === line.text ? (
-                    <AlertCircle size={11} className="animate-pulse" />
-                  ) : (
-                    <Sparkles size={11} />
-                  )}
-                  转任务
-                </Button>
+            <li key={i} className="space-y-0.5">
+              {/* 根待办 */}
+              <div className="flex items-center gap-2 rounded-md bg-background px-2.5 py-1.5">
+                <span className="flex-1 truncate text-xs font-medium">{node.line.text}</span>
+                {rootConverted ? (
+                  <span className="flex items-center gap-0.5 text-[10px] text-muted-foreground">
+                    <CheckCircle2 size={11} /> 已转
+                  </span>
+                ) : (
+                  <Button
+                    size="sm"
+                    variant="outline"
+                    onClick={() => handleConvertRoot(node.line.text)}
+                    disabled={converting === node.line.text}
+                    className="h-6 gap-1 px-2 text-[10px]"
+                  >
+                    {converting === node.line.text ? (
+                      <AlertCircle size={11} className="animate-pulse" />
+                    ) : (
+                      <Sparkles size={11} />
+                    )}
+                    转任务
+                  </Button>
+                )}
+              </div>
+              {/* 子待办（缩进 + 左竖线，v1.10.2 对齐 TasksPage 子任务样式）*/}
+              {node.children.length > 0 && (
+                <ul className="ml-3 space-y-0.5 border-l border-border pl-3">
+                  {node.children.map((child, j) => {
+                    const subConverted = rootTask ? !!findSubTask(rootTask.id, child.text) : false
+                    const subDisabled = !rootTask // 父未转时子不可转（需 parentId）
+                    return (
+                      <li key={j} className="flex items-center gap-2 bg-background/50 px-2.5 py-1">
+                        <span className="flex-1 truncate text-xs text-muted-foreground">{child.text}</span>
+                        {subConverted ? (
+                          <span className="flex items-center gap-0.5 text-[10px] text-muted-foreground">
+                            <CheckCircle2 size={10} /> 已转
+                          </span>
+                        ) : (
+                          <Button
+                            size="sm"
+                            variant="outline"
+                            onClick={() => rootTask && handleConvertSub(rootTask.id, child.text)}
+                            disabled={subDisabled || converting === `${rootTask?.id}>${child.text}`}
+                            className="h-5 gap-1 px-1.5 text-[10px]"
+                            title={subDisabled ? '先转父任务' : '转为子任务'}
+                          >
+                            {converting === `${rootTask?.id}>${child.text}` ? (
+                              <AlertCircle size={10} className="animate-pulse" />
+                            ) : (
+                              <Sparkles size={10} />
+                            )}
+                            转子任务
+                          </Button>
+                        )}
+                      </li>
+                    )
+                  })}
+                </ul>
               )}
             </li>
           )
         })}
       </ul>
-      {error && (
-        <p className="mt-2 text-[10px] text-destructive">转任务失败：{error}</p>
-      )}
+      {error && <p className="mt-2 text-[10px] text-destructive">转任务失败：{error}</p>}
     </div>
   )
 }

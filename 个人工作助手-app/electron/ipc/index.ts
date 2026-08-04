@@ -68,6 +68,7 @@ import type {
   TaskDraftInput,
   TaskFromNoteInput,
   TaskSubtaskInput,
+  TaskDeleteParams,
   Reminder,
   ReminderInput,
   PomodoroSession,
@@ -736,9 +737,25 @@ function registerTaskHandlers() {
     }
   })
 
-  ipcMain.handle('task:delete', (_, id: string): IpcResult<true> => {
+  ipcMain.handle('task:delete', (_, params: TaskDeleteParams): IpcResult<true> => {
     try {
-      getDb().delete(tasks).where(eq(tasks.id, id)).run()
+      const db = getDb()
+      // v1.10.1：cascade=true 时级联删子任务（删根任务场景）。子任务删除无子任务，无需级联。
+      if (params.cascade) {
+        db.delete(tasks).where(eq(tasks.parentId, params.id)).run()
+      }
+      db.delete(tasks).where(eq(tasks.id, params.id)).run()
+      return ok(true)
+    } catch (e) {
+      return err(String(e))
+    }
+  })
+
+  // v1.10.1：子任务转根任务（清 parentId）。用于解除父子关系让子任务独立。
+  ipcMain.handle('task:promote_subtask', (_, id: string): IpcResult<true> => {
+    try {
+      const now = Math.floor(Date.now() / 1000)
+      getDb().update(tasks).set({ parentId: null, updatedAt: now }).where(eq(tasks.id, id)).run()
       return ok(true)
     } catch (e) {
       return err(String(e))
