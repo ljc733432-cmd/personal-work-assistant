@@ -76,6 +76,7 @@ CREATE TABLE IF NOT EXISTS tasks (
   source                   TEXT NOT NULL DEFAULT 'manual',
   source_conversation_id   TEXT,
   source_note_path         TEXT,                          -- v1.9.1：笔记转任务溯源（笔记 fileName，可空）
+  parent_id                TEXT,                          -- v1.10：父任务 id（两级层级，可空）
   followup_log             TEXT,
   completed_at             INTEGER,                       -- v1.8：完成时间戳（可空）
   created_at               INTEGER NOT NULL DEFAULT (unixepoch()),
@@ -149,6 +150,11 @@ export function getDb(): BetterSQLite3Database<typeof schema> {
   if (!taskCols.some((c) => c.name === 'source_note_path')) {
     _raw.exec('ALTER TABLE tasks ADD COLUMN source_note_path TEXT')
     logInfo('[db] 迁移：tasks 已加列 source_note_path')
+  }
+  // v1.10 迁移：tasks 加 parent_id 列（子任务两级层级）
+  if (!taskCols.some((c) => c.name === 'parent_id')) {
+    _raw.exec('ALTER TABLE tasks ADD COLUMN parent_id TEXT')
+    logInfo('[db] 迁移：tasks 已加列 parent_id')
   }
 
   _db = drizzle(_raw, { schema })

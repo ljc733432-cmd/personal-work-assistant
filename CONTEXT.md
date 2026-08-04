@@ -57,6 +57,7 @@ Provider 之上的语义化快捷分组（ADR-022）。`{id, name, providerId}`�
 - `priority`：`low` / `medium` / `high`。
 - `source`：`manual`（手动建）/ `from_chat`（AI 抽取）/ `from_note`（v1.9.1 笔记转任务）。
 - `sourceNotePath`（v1.9.1）：笔记转任务溯源，存笔记 fileName（笔记库内稳定）。服务端从 noteId 解析填充，不信任前端传路径。
+- `parentId`（v1.10）：父任务 id，两级层级。null=根任务，非空=子任务。子任务 source 跟随父任务。不支持子任务的子任务（两级限制，UI 不给入口）。
 
 ### **任务抽取草稿（Extraction Draft）**
 AI 从对话中抽出的任务**草稿**。**不直接入库**，必须用户点"加入任务"才落库。
