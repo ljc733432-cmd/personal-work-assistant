@@ -48,6 +48,7 @@ import { truncateByTokenBudget } from '../services/providers/truncate'
 import { resolveProviderId } from '../services/providers/router'
 import { extractTasks } from '../services/taskExtractor'
 import { generateReport } from '../services/reportGenerator'
+import { assistNote } from '../services/noteAssistant'
 import { assembleTools, type ToolContext } from '../services/tools'
 import { getSystemDirs, type AccessibleDir } from '../services/systemDirs'
 import { PROVIDER_PRESETS } from '../services/providers/types'
@@ -90,6 +91,8 @@ import type {
   ReportResult,
   ReportPreviewParams,
   ReportPreviewResult,
+  NoteAiParams,
+  NoteAiResult,
 } from '../types'
 
 /**
@@ -970,6 +973,56 @@ function registerNoteHandlers() {
     } catch (e) {
       return err(String(e))
     }
+  })
+
+  // ---------- AI 笔记助手（v1.9 M18，PRD §15.2①） ----------
+  // 复用 report.providerId（与报告模型共用，零新配置项）。非流式，照搬 report:generate 的可取消模式。
+  // 结果以「可插入块」返回 Markdown，用户点插入才写进笔记（不静默改）。
+  const noteAbortMap = new Map<string, AbortController>()
+
+  ipcMain.handle(
+    'note:ai',
+    async (_, params: NoteAiParams): Promise<IpcResult<NoteAiResult>> => {
+      try {
+        if (!params.content.trim()) return err('笔记内容为空，无法执行 AI 操作')
+
+        // 复用 report.providerId（语义相近：都是非流式文本处理，零新配置项）
+        const providerRow = getDb()
+          .select()
+          .from(settings)
+          .where(eq(settings.key, 'report.providerId'))
+          .get()
+        const providerId = providerRow?.value ?? null
+        if (!providerId) {
+          return err('未配置报告模型，AI 笔记助手共用此模型，请在设置页「报告模型」区选择')
+        }
+
+        const reqId = params.reqId ?? ''
+        const ac = new AbortController()
+        if (reqId) noteAbortMap.set(reqId, ac)
+
+        try {
+          const result = await assistNote(providerId, params.op, params.content, {
+            question: params.question,
+            signal: ac.signal,
+          })
+          return ok({ result })
+        } finally {
+          if (reqId) noteAbortMap.delete(reqId)
+        }
+      } catch (e) {
+        return err(String(e))
+      }
+    },
+  )
+
+  ipcMain.handle('note:ai_cancel', (_, reqId: string): IpcResult<true> => {
+    const ac = noteAbortMap.get(reqId)
+    if (ac) {
+      ac.abort()
+      noteAbortMap.delete(reqId)
+    }
+    return ok(true)
   })
 }
 

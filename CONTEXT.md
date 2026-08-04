@@ -208,8 +208,17 @@ AI 聚合「完成任务 + 对话 + 番茄钟 + 提醒」生成的 Markdown 工�
 - **生成**：非流式（ADR-010 范式，照搬 taskExtractor），`reportGenerator.ts` + `report:generate` IPC。providerId 从 settings KV `report.providerId` 读（建议便宜模型，报告不需强推理）。
 - **数据聚合**：report:generate IPC 拉 tasks(按 completedAt) + messages(按 createdAt，`listMessagesInRange`) + pomodoros(按 startedAt) + reminders(按 time)。全空拦截避免浪费 API。
 - **生成前数据清单**（PRD §15.8 风险对策）：UI 先展示「将基于以下数据」让用户确认范围。
-- **入口**：工具页 ReportToolbox（照搬 PdfToolbox 骨架，daily/weekly 模式切换 + 历史报告列表）。
+- **入口**：工具页 ReportToolbox（照搬 PdfToolbox 骨架，daily/weekly/custom 模式切换 + 历史报告列表）。
 - **不要叫**："总结/汇报/summary"——Report 特指 AI 生成的日报/周报笔记。
+
+### **NoteAiAssist（AI 笔记助手，v1.9 M18，PRD §15.2①）**
+笔记页对当前笔记执行的 4 个 AI 操作，结果以「可插入块」呈现。
+- **4 个操作（NoteAiOp）**：summary 摘要（提炼核心要点）/ todos 提炼待办（抽 `- [ ]` 任务项）/ questions 提问（基于笔记提启发问题，可选追问）/ continue 续写（顺延内容续写一段）。
+- **复用 report.providerId**（零新配置项，与报告模型共用，语义相近都是非流式文本处理）。
+- **非流式 + 可取消**（照搬 reportGenerator + report:generate 的 AbortController 模式）：noteAssistant.ts + note:ai/note:ai_cancel IPC。
+- **内联面板**（不遮正文）：NotesPage 顶栏「AI 助手」按钮触发，正文区上方展开可折叠面板。4 操作 tab + questions 输入框 + Markdown 渲染结果 + 「插入到笔记末尾/复制/关闭」。
+- **不静默改笔记**（关键约束，与「不静默建任务」同源）：结果以可插入块呈现，用户点「插入」才 `setDraftContent(追加) + update` 落库。插入格式 `## AI 生成（操作名）` 分隔，保留可追溯性。
+- **不要叫**："笔记 AI/笔记助手/智能笔记"——NoteAiAssist 特指笔记页内的 4 个 AI 操作（区别于对话里 create_note FC 工具）。
 
 ---
 
@@ -325,4 +334,5 @@ PRD §7 验收优先级。P0 必做 = v1 完成；P1 可选。
 | 首页 / 统计页 / 报表 | **Dashboard**（v1.4 数据看板，历史趋势分析，区别于概览页今日快照） |
 | 路由 / 自动切换 / 分类器 | **ModelTier**（v1.6 模型档位，手动语义分组，不做自动判定） |
 | 总结 / 汇报 / summary | **Report**（v1.8 AI 日报/周报，特指 AI 生成的报告笔记） |
+| 笔记 AI / 智能笔记 | **NoteAiAssist**（v1.9 笔记页 4 个 AI 操作，区别于 create_note FC 工具） |
 | finishTime / doneAt | **completedAt**（v1.8 任务完成时间戳，与 status='done' 语义对齐） |

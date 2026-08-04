@@ -384,3 +384,21 @@ export interface ReportPreviewResult {
   rangeLabel: string // 如「今日」「本周」「2026-08-01 ~ 2026-08-04」
   empty: boolean // 全空（generate 会拦截，preview 提前告知）
 }
+
+// ---------- NoteAiAssist：AI 笔记助手（v1.9 M18，PRD §15.2①） ----------
+// 复用 report.providerId（与报告模型共用，零新配置项）。非流式，照搬 reportGenerator 范式。
+// 结果以「可插入块」返回（Markdown），用户点插入才写进笔记（不静默改）。
+export type NoteAiOp = 'summary' | 'todos' | 'questions' | 'continue'
+
+/** note:ai 入参。 */
+export interface NoteAiParams {
+  op: NoteAiOp
+  content: string // 当前笔记正文
+  question?: string // op='questions' 时的可选用户追问（空则 AI 自行提问）
+  reqId?: string // 可取消（v1.8.1 打磨同款）
+}
+
+/** note:ai 返回。result 为 AI 生成的 Markdown。 */
+export interface NoteAiResult {
+  result: string
+}
