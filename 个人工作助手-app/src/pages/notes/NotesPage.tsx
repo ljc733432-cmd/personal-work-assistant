@@ -266,16 +266,16 @@ export function NotesPage() {
             )}
 
             {/* 正文 */}
-            <div className="flex-1 overflow-hidden px-6 py-4">
+            <div className="flex flex-1 flex-col overflow-hidden px-6 py-4">
               {editing ? (
                 <Textarea
                   value={draftContent}
                   onChange={(e) => setDraftContent(e.target.value)}
                   placeholder="输入 Markdown 正文…（Shift+Enter 换行）"
-                  className="h-full min-h-0 flex-1 resize-none border-transparent bg-transparent font-mono text-sm focus-visible:ring-0"
+                  className="min-h-0 flex-1 resize-none border-transparent bg-transparent font-mono text-sm focus-visible:ring-0"
                 />
               ) : (
-                <div className="mx-auto h-full max-w-3xl overflow-y-auto">
+                <div className="mx-auto flex-1 overflow-y-auto max-w-3xl">
                   {/* v1.9.1 笔记待办转任务面板（PRD §15.2②）：解析 - [ ] 未勾选项，提供转任务按钮 */}
                   <NoteTodosPanel
                     content={active.content}

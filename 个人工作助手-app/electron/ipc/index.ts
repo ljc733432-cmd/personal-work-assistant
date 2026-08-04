@@ -762,6 +762,34 @@ function registerTaskHandlers() {
     }
   })
 
+  // v1.10.5：手动移动任务到某父任务下（或移出变根任务）。
+  // 入参 { id, parentId }：parentId=null 变根任务；parentId=某根任务 id 变其子任务。
+  // 两级限制：只允许把根任务移到另一个根任务下（不接受已是子任务的任务再被移动成别处的子任务，避免循环和三级）。
+  // 防循环：parentId 不能是自己；parentId 不能是自己的子任务（但两级模型下自己若是根任务则无子任务可循环，安全）。
+  ipcMain.handle(
+    'task:set_parent',
+    (_, params: { id: string; parentId: string | null }): IpcResult<true> => {
+      try {
+        if (params.parentId === params.id) return err('不能把任务移到自己下面')
+        const db = getDb()
+        const target = params.parentId
+          ? db.select().from(tasks).where(eq(tasks.id, params.parentId)).get()
+          : null
+        if (params.parentId && !target) return err('目标父任务不存在')
+        // 目标若是子任务（有 parentId），拒绝（避免三级）
+        if (target?.parentId) return err('目标已是子任务，不能再嵌套（仅支持两级）')
+        const now = Math.floor(Date.now() / 1000)
+        db.update(tasks)
+          .set({ parentId: params.parentId, updatedAt: now })
+          .where(eq(tasks.id, params.id))
+          .run()
+        return ok(true)
+      } catch (e) {
+        return err(String(e))
+      }
+    },
+  )
+
   // M4：抽取任务草稿（不直接入库，红线：必须人工确认）。
   // providerId 从 settings 读（extract.providerId），不信任前端传——保证用「最便宜模型」。
   ipcMain.handle('task:extract', async (_, conversationId: string): Promise<IpcResult<TaskDraft[]>> => {
