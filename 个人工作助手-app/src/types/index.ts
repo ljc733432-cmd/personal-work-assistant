@@ -129,7 +129,7 @@ export interface SearchProviderInput {
 // ---------- Task：任务（M3） ----------
 export type TaskStatus = 'todo' | 'in_progress' | 'done'
 export type TaskPriority = 'low' | 'medium' | 'high'
-export type TaskSource = 'manual' | 'from_chat'
+export type TaskSource = 'manual' | 'from_chat' | 'from_note'
 
 export interface Task {
   id: string
@@ -140,6 +140,7 @@ export interface Task {
   dueDate: number | null
   source: TaskSource
   sourceConversationId: string | null
+  sourceNotePath: string | null // v1.9.1 笔记转任务溯源
   followupLog: string | null
   completedAt: number | null // v1.8：完成时间戳，status→done 时写
   createdAt: number
@@ -251,6 +252,13 @@ export interface TaskDraftInput {
   priority?: TaskPriority
   dueDate?: number | null
   conversationId: string // 溯源用
+}
+
+export interface TaskFromNoteInput {
+  title: string
+  noteId: string
+  priority?: TaskPriority
+  dueDate?: number | null
 }
 
 // ---------- 工具确认请求（write_file 覆盖等） ----------

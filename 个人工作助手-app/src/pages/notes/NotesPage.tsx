@@ -10,6 +10,7 @@ import {
   X,
   CheckCircle2,
   AlertCircle,
+  CheckSquare,
 } from '@/components/ui/icons'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
@@ -17,9 +18,10 @@ import { Textarea } from '@/components/ui/textarea'
 import { Markdown } from '@/components/Markdown'
 import { EmptyState } from '@/components/ui/EmptyState'
 import { useNotesStore } from '@/stores/notes'
+import { useTasksStore } from '@/stores/tasks'
 import { invoke } from '@/lib/ipc'
 import { cn } from '@/lib/utils'
-import type { Note, NoteSearchHit, NoteAiOp, NoteAiResult } from '@/types'
+import type { Note, NoteSearchHit, NoteAiOp, NoteAiResult, Task } from '@/types'
 
 /**
  * 笔记页（M12.8 B 轨 + v1.9 M18 AI 笔记助手）。
@@ -32,6 +34,7 @@ import type { Note, NoteSearchHit, NoteAiOp, NoteAiResult } from '@/types'
  */
 export function NotesPage() {
   const { notes, refresh, create, update, remove } = useNotesStore()
+  const { tasks, refresh: refreshTasks, createFromNote } = useTasksStore()
   const [activeId, setActiveId] = useState<string | null>(null)
   const [query, setQuery] = useState('')
   const [hits, setHits] = useState<NoteSearchHit[] | null>(null)
@@ -43,7 +46,8 @@ export function NotesPage() {
 
   useEffect(() => {
     refresh()
-  }, [refresh])
+    refreshTasks() // v1.9.1：拉任务列表用于判断笔记待办「已转」状态
+  }, [refresh, refreshTasks])
 
   const active = notes.find((n) => n.id === activeId) ?? null
 
@@ -245,6 +249,14 @@ export function NotesPage() {
                 />
               ) : (
                 <div className="mx-auto max-w-3xl">
+                  {/* v1.9.1 笔记待办转任务面板（PRD §15.2②）：解析 - [ ] 未勾选项，提供转任务按钮 */}
+                  <NoteTodosPanel
+                    content={active.content}
+                    noteId={active.id}
+                    noteFileName={active.fileName}
+                    tasks={tasks}
+                    onConvert={createFromNote}
+                  />
                   {active.content.trim() ? (
                     <Markdown content={active.content} />
                   ) : (
@@ -426,6 +438,112 @@ function NoteAiPanel({
           </div>
         )}
       </div>
+    </div>
+  )
+}
+
+// ---------- 笔记待办转任务（v1.9.1 M19，PRD §15.2②） ----------
+// GFM 任务列表行正则：前导空格 + 标记(-/*) + [ ]/[x] + 文本
+// 仅解析未勾选项（- [ ]）展示转任务按钮，已勾选（- [x]）不显示（已完成无需转）。
+const TASK_LINE_RE = /^(\s*)([-*+])\s+\[([ xX])\]\s+(.*)$/
+
+interface ParsedTaskLine {
+  text: string // 任务文本（去尾部空白）
+  checked: boolean
+}
+
+/** 解析笔记内容里的 GFM 任务列表项。返回顺序与原文一致。 */
+function parseTaskLines(content: string): ParsedTaskLine[] {
+  const result: ParsedTaskLine[] = []
+  for (const line of content.split('\n')) {
+    const m = TASK_LINE_RE.exec(line)
+    if (m) {
+      result.push({
+        text: m[4].trim(),
+        checked: m[3].toLowerCase() === 'x',
+      })
+    }
+  }
+  return result
+}
+
+function NoteTodosPanel({
+  content,
+  noteId,
+  noteFileName,
+  tasks,
+  onConvert,
+}: {
+  content: string
+  noteId: string
+  noteFileName: string
+  tasks: Task[]
+  onConvert: (input: { title: string; noteId: string }) => Promise<Task>
+}) {
+  const [converting, setConverting] = useState<string | null>(null) // 正在转的 title
+  const [error, setError] = useState<string | null>(null)
+  const todoLines = parseTaskLines(content).filter((l) => !l.checked && l.text)
+
+  // 判断某 title 是否已转（source=from_note + sourceNotePath 匹配 + title 精确匹配）
+  const isConverted = (title: string) =>
+    tasks.some(
+      (t) => t.source === 'from_note' && t.sourceNotePath === noteFileName && t.title === title,
+    )
+
+  if (todoLines.length === 0) return null // 无未勾选待办，不显示面板
+
+  const handleConvert = async (title: string) => {
+    setConverting(title)
+    setError(null)
+    try {
+      await onConvert({ title, noteId })
+    } catch (e) {
+      setError(String(e))
+    } finally {
+      setConverting(null)
+    }
+  }
+
+  return (
+    <div className="mb-4 rounded-md border bg-surface-2 p-3">
+      <div className="mb-2 flex items-center gap-1.5 text-xs font-medium text-muted-foreground">
+        <CheckSquare size={13} />
+        <span>笔记待办（{todoLines.length}）</span>
+        <span className="text-[10px] text-muted-foreground/70">点「转任务」加入任务列表</span>
+      </div>
+      <ul className="space-y-1">
+        {todoLines.map((line, i) => {
+          const converted = isConverted(line.text)
+          return (
+            <li key={i} className="flex items-center gap-2 rounded-md bg-background px-2.5 py-1.5">
+              <span className="flex-1 truncate text-xs">{line.text}</span>
+              {converted ? (
+                <span className="flex items-center gap-0.5 text-[10px] text-muted-foreground">
+                  <CheckCircle2 size={11} /> 已转
+                </span>
+              ) : (
+                <Button
+                  size="sm"
+                  variant="outline"
+                  onClick={() => handleConvert(line.text)}
+                  disabled={converting === line.text}
+                  className="h-6 gap-1 px-2 text-[10px]"
+                >
+                  {converting === line.text ? (
+                    <AlertCircle size={11} className="animate-pulse" />
+                  ) : (
+                    <Sparkles size={11} />
+                  )}
+                  转任务
+                </Button>
+              )}
+            </li>
+          )
+        })}
+      </ul>
+      {error && (
+        <p className="mt-2 text-[10px] text-destructive">转任务失败：{error}</p>
+      )}
     </div>
   )
 }

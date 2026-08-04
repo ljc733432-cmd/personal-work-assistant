@@ -34,6 +34,7 @@ const ALLOWED_INVOKE = [
   'task:delete',            // 删除任务
   'task:extract',           // 抽取任务草稿（M4，不直接入库）
   'task:create_from_draft', // 草稿确认入库（M4，source=from_chat）
+  'task:create_from_note',  // 笔记转任务（v1.9.1，source=from_note + sourceNotePath 溯源）
   'reminder:list',          // 列提醒（M12.5 v1.2）
   'reminder:upsert',        // 新增/更新提醒
   'reminder:delete',        // 删除提醒

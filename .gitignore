@@ -13,6 +13,9 @@ node_modules/
 个人工作助手-app/app.db*
 个人工作助手-app/*.log
 *.local
+# 用户笔记库目录（可能设在项目根，属用户数据不进 git；v1.9.1 发现误提交 book/）
+book/
+notes/
 
 # ===== 编辑器 / 系统 =====
 .vscode/*

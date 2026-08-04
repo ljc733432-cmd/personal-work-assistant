@@ -1,5 +1,5 @@
 import { create } from 'zustand'
-import type { Task, TaskDraftInput, TaskInput } from '@/types'
+import type { Task, TaskDraftInput, TaskFromNoteInput, TaskInput } from '@/types'
 import { invoke } from '@/lib/ipc'
 
 interface TasksState {
@@ -10,6 +10,8 @@ interface TasksState {
   upsert: (input: TaskInput) => Promise<void>
   /** M4：草稿确认入库（source 服务端强制 from_chat）。 */
   createFromDraft: (input: TaskDraftInput) => Promise<Task>
+  /** v1.9.1：笔记转任务（source 服务端强制 from_note + sourceNotePath 溯源）。 */
+  createFromNote: (input: TaskFromNoteInput) => Promise<Task>
   remove: (id: string) => Promise<void>
 }
 
@@ -36,6 +38,13 @@ export const useTasksStore = create<TasksState>((set) => ({
 
   createFromDraft: async (input) => {
     const task = await invoke<Task>('task:create_from_draft', input)
+    const list = await invoke<Task[]>('task:list')
+    set({ tasks: list })
+    return task
+  },
+
+  createFromNote: async (input) => {
+    const task = await invoke<Task>('task:create_from_note', input)
     const list = await invoke<Task[]>('task:list')
     set({ tasks: list })
     return task

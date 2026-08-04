@@ -52,10 +52,11 @@ Provider 之上的语义化快捷分组（ADR-022）。`{id, name, providerId}`�
 ## B. 任务域
 
 ### **Task（任务）**
-中性通用待办，不预设职业。`{title, description?, status, priority, dueDate?, remindTimes[], source, sourceConversationId?, followupLog}`。
+中性通用待办，不预设职业。`{title, description?, status, priority, dueDate?, remindTimes[], source, sourceConversationId?, sourceNotePath?, followupLog}`。
 - `status`：`todo` / `in_progress` / `done`。
 - `priority`：`low` / `medium` / `high`。
-- `source`：`manual`（手动建）/ `from_chat`（AI 抽取）。
+- `source`：`manual`（手动建）/ `from_chat`（AI 抽取）/ `from_note`（v1.9.1 笔记转任务）。
+- `sourceNotePath`（v1.9.1）：笔记转任务溯源，存笔记 fileName（笔记库内稳定）。服务端从 noteId 解析填充，不信任前端传路径。
 
 ### **任务抽取草稿（Extraction Draft）**
 AI 从对话中抽出的任务**草稿**。**不直接入库**，必须用户点"加入任务"才落库。
