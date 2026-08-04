@@ -47,4 +47,7 @@ export {
   ClipboardTextIcon as ClipboardText, // 报告/日报（v1.8 AI 日报/周报）
   CaretDownIcon as CaretDown, // 折叠展开（v1.10 子任务区）
   CaretRightIcon as CaretRight, // 折叠收起（v1.10 子任务区）
+  TrendUpIcon as TrendUp, // 趋势上升（v1.10.8 看板趋势箭头）
+  TrendDownIcon as TrendDown, // 趋势下降（v1.10.8 看板趋势箭头）
+  MinusIcon as Minus, // 趋势持平（v1.10.8 看板趋势箭头）
 } from '@phosphor-icons/react'

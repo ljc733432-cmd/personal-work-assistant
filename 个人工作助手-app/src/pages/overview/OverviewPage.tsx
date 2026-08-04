@@ -7,6 +7,7 @@ import { useNotesStore } from '@/stores/notes'
 import { useRemindersStore } from '@/stores/reminders'
 import { invoke } from '@/lib/ipc'
 import { useCountUp } from '@/lib/useCountUp'
+import { computeLogicallyDoneIds } from '@/lib/taskStatus'
 import type { PomodoroSession, Task, Note } from '@/types'
 
 /**
@@ -44,15 +45,19 @@ export function OverviewPage() {
     })()
   }, [refreshTasks, refreshNotes, refreshReminders])
 
-  // 今日到期/逾期/高优先级未完成任务
+  // 今日到期/逾期/高优先级未完成任务。
+  // v1.10.8：统计口径与任务页一致——只算根任务（子任务不独立计数，归属父任务）。
+  // 用「逻辑完成」判定：根任务 status=done 但子任务未全完成时不算完成。
   const now = Math.floor(Date.now() / 1000)
   const endOfToday = Math.floor(new Date().setHours(23, 59, 59, 999) / 1000)
-  const pendingTasks = tasks.filter((t) => t.status !== 'done')
+  const rootTasks = tasks.filter((t) => t.parentId === null)
+  const logicallyDoneIds = computeLogicallyDoneIds(tasks)
+  const pendingTasks = rootTasks.filter((t) => !logicallyDoneIds.has(t.id))
   const dueToday = pendingTasks.filter(
     (t) => (t.dueDate && t.dueDate <= endOfToday) || t.priority === 'high',
   )
   const pendingReminders = reminders.filter((r) => !r.done)
-  const recentTasks = [...tasks].sort((a, b) => b.updatedAt - a.updatedAt).slice(0, 3)
+  const recentTasks = [...rootTasks].sort((a, b) => b.updatedAt - a.updatedAt).slice(0, 3)
   const recentNotes = [...notes].sort((a, b) => b.updatedAt - a.updatedAt).slice(0, 3)
 
   const hour = new Date().getHours()
