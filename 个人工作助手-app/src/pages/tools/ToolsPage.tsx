@@ -1,16 +1,17 @@
 import { useState } from 'react'
-import { Bell, Timer, FileText, ArrowLeft, FilePdf } from '@/components/ui/icons'
+import { Bell, Timer, FileText, ArrowLeft, FilePdf, ClipboardText } from '@/components/ui/icons'
 import { cn } from '@/lib/utils'
 import { ReminderSection } from './ReminderSection'
 import { ConverterSection } from './ConverterSection'
 import { PdfToolbox } from './PdfToolbox'
+import { ReportToolbox } from './ReportToolbox'
 
 /**
- * 工具页（M12.5~M12.9 v1.2 + M16 v1.7 工具扩展）。
+ * 工具页（M12.5~M12.9 v1.2 + M16 v1.7 + M17 v1.8 工具扩展）。
  * PRD §12.3：卡片网格入口 → 点进具体工具。
- * v1.2 四基础工具 + v1.7 PDF 工具箱。
+ * v1.2 四基础工具 + v1.7 PDF 工具箱 + v1.8 AI 日报/周报。
  */
-type Tool = 'reminders' | 'pomodoro' | 'converter' | 'pdf' | null
+type Tool = 'reminders' | 'pomodoro' | 'converter' | 'pdf' | 'report' | null
 
 export function ToolsPage() {
   const [active, setActive] = useState<Tool>(null)
@@ -23,6 +24,9 @@ export function ToolsPage() {
   }
   if (active === 'pdf') {
     return <PdfToolbox onBack={() => setActive(null)} />
+  }
+  if (active === 'report') {
+    return <ReportToolbox onBack={() => setActive(null)} />
   }
 
   return (
@@ -56,6 +60,12 @@ export function ToolsPage() {
             title="PDF 工具箱"
             desc="合并 / 提取 / 拆分"
             onClick={() => setActive('pdf')}
+          />
+          <ToolCard
+            icon={ClipboardText}
+            title="AI 日报/周报"
+            desc="自动汇总今日/本周工作"
+            onClick={() => setActive('report')}
           />
         </div>
       </div>

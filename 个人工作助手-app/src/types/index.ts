@@ -141,6 +141,7 @@ export interface Task {
   source: TaskSource
   sourceConversationId: string | null
   followupLog: string | null
+  completedAt: number | null // v1.8：完成时间戳，status→done 时写
   createdAt: number
   updatedAt: number
 }
@@ -308,4 +309,25 @@ export interface PdfSplitResult {
   ok: boolean
   outputs: string[]
   error?: string
+}
+
+// ---------- Report：AI 日报/周报（v1.8 M17） ----------
+export interface ReportPayload {
+  range: 'daily' | 'weekly'
+  fromSec: number
+  toSec: number
+  tasks: { title: string; priority: TaskPriority; completedAt: number | null }[]
+  conversations: { role: 'user' | 'assistant'; content: string; createdAt: number }[]
+  pomodoros: { startedAt: number; durationMin: number; completed: boolean }[]
+  reminders: { time: number; content: string; done: boolean }[]
+}
+
+export interface ReportGenerateParams {
+  range: 'daily' | 'weekly'
+  fromSec?: number
+  toSec?: number
+}
+
+export interface ReportResult {
+  note: Note
 }

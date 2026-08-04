@@ -11,6 +11,7 @@ import { WorkDirSection } from './WorkDirSection'
 import { SearchProviderSection } from './SearchProviderSection'
 import { ExtractSection } from './ExtractSection'
 import { FollowupSection } from './FollowupSection'
+import { ReportSection } from './ReportSection'
 import { RouterSection } from './RouterSection'
 import { AppearanceSection } from './AppearanceSection'
 import { NotesSection } from './NotesSection'
@@ -105,6 +106,10 @@ export function SettingsPage() {
 
         <div className="!mt-10 border-t pt-2">
           <FollowupSection />
+        </div>
+
+        <div className="!mt-10 border-t pt-2">
+          <ReportSection />
         </div>
       </div>
     </div>

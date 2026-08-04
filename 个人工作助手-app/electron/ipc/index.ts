@@ -28,6 +28,7 @@ import {
   listConversations,
   getConversation,
   listMessages,
+  listMessagesInRange,
 } from '../services/conversation/factory'
 import { listSearchProviders, getActiveSearchConfig } from '../services/search/factory'
 import { pingTavily } from '../services/searchTools'
@@ -46,6 +47,7 @@ import { chatWithProvider, type ChatResult } from '../services/providers/chat'
 import { truncateByTokenBudget } from '../services/providers/truncate'
 import { resolveProviderId } from '../services/providers/router'
 import { extractTasks } from '../services/taskExtractor'
+import { generateReport } from '../services/reportGenerator'
 import { assembleTools, type ToolContext } from '../services/tools'
 import { getSystemDirs, type AccessibleDir } from '../services/systemDirs'
 import { PROVIDER_PRESETS } from '../services/providers/types'
@@ -83,6 +85,9 @@ import type {
   PdfInfo,
   PdfResult,
   PdfSplitResult,
+  ReportPayload,
+  ReportGenerateParams,
+  ReportResult,
 } from '../types'
 
 /**
@@ -655,6 +660,7 @@ function rowToTask(row: typeof tasks.$inferSelect): Task {
     source: row.source,
     sourceConversationId: row.sourceConversationId,
     followupLog: row.followupLog,
+    completedAt: row.completedAt,
     createdAt: row.createdAt,
     updatedAt: row.updatedAt,
   }
@@ -678,6 +684,16 @@ function registerTaskHandlers() {
 
       if (existing) {
         // 更新（不改 source/sourceConversationId/followupLog，这些由服务端控制）
+        // v1.8：completedAt 由 status 推导（切到 done 写 now，切出 done 清 null），
+        //   与 source/followupLog 同样「服务端控制」策略，不入 TaskInput。
+        const prevStatus = existing.status
+        const nextStatus = input.status ?? existing.status
+        const completedAt =
+          nextStatus === 'done' && prevStatus !== 'done'
+            ? now
+            : nextStatus !== 'done' && prevStatus === 'done'
+              ? null
+              : existing.completedAt // 状态未变或 done→done 保持
         db.update(tasks)
           .set({
             title: input.title,
@@ -685,6 +701,7 @@ function registerTaskHandlers() {
             status: input.status ?? existing.status,
             priority: input.priority ?? existing.priority,
             dueDate: input.dueDate ?? null,
+            completedAt,
             updatedAt: now,
           })
           .where(eq(tasks.id, id))
@@ -1101,6 +1118,152 @@ function registerDashboardHandlers() {
   )
 }
 
+// ---------- Report handlers（v1.8 M17 AI 日报/周报，PRD §15.3④） ----------
+// 生成走非流式（ADR-010 范式，照搬 task:extract），providerId 从 settings KV `report.providerId` 读。
+// 数据聚合：tasks(按 completedAt) + messages(按 createdAt，复用 listMessagesInRange)
+//   + pomodoros(按 startedAt) + reminders(按 time)。全量拉后内存过滤（数据量小，与 dashboard 同策略）。
+// 报告写成 .md 笔记存入笔记库（ADR-025 复用不建表），路径安全在 noteStore 内部闭环。
+function registerReportHandlers() {
+  ipcMain.handle(
+    'report:generate',
+    async (_, params: ReportGenerateParams): Promise<IpcResult<ReportResult>> => {
+      try {
+        // 1. 读报告模型配置（不信任前端传，保证用配置的模型）
+        const providerRow = getDb()
+          .select()
+          .from(settings)
+          .where(eq(settings.key, 'report.providerId'))
+          .get()
+        const reportProviderId = providerRow?.value ?? null
+        if (!reportProviderId) {
+          return err('未配置报告模型，请在设置页「报告模型」区选择一个模型')
+        }
+
+        // 2. 算时间范围（不传则默认：daily=今日 0:00~23:59:59；weekly=本周一 0:00~今天 23:59:59）
+        const { fromSec, toSec } = computeRange(params)
+
+        // 3. 聚合数据
+        const db = getDb()
+
+        // 任务：done + completedAt 落在区间（completedAt 为 null 的历史 done 任务忽略，无法判定何时完成）
+        const allTasks = listTasks()
+        const reportTasks = allTasks
+          .filter(
+            (t) =>
+              t.status === 'done' &&
+              t.completedAt !== null &&
+              t.completedAt >= fromSec &&
+              t.completedAt <= toSec,
+          )
+          .map((t) => ({
+            title: t.title,
+            priority: t.priority,
+            completedAt: t.completedAt,
+          }))
+
+        // 对话：按时间范围取（跨所有会话），role 只取 user/assistant（system/tool 噪音），
+        //   content 截前 200 字，总数限 50 条防超长（reportGenerator prompt 已说明截断）
+        const rawMsgs = listMessagesInRange(fromSec, toSec)
+        const reportMsgs = rawMsgs
+          .filter((m) => m.role === 'user' || m.role === 'assistant')
+          .slice(0, 50)
+          .map((m) => ({
+            role: m.role as 'user' | 'assistant',
+            content: m.content.length > 200 ? m.content.slice(0, 200) + '…' : m.content,
+            createdAt: m.createdAt,
+          }))
+
+        // 番茄钟：startedAt 落在区间
+        const pomoRows = db
+          .select()
+          .from(pomodoroSessions)
+          .where(
+            and(gte(pomodoroSessions.startedAt, fromSec), lte(pomodoroSessions.startedAt, toSec)),
+          )
+          .all()
+        const reportPomos = pomoRows.map((r) => ({
+          startedAt: r.startedAt,
+          durationMin: r.durationMin,
+          completed: r.completed,
+        }))
+
+        // 提醒：time 落在区间（提醒的「发生时间」语义最贴近日报）
+        const reportReminders = listReminders()
+          .filter((r) => r.time >= fromSec && r.time <= toSec)
+          .map((r) => ({ time: r.time, content: r.content, done: r.done }))
+
+        // 4. 全空拦截（PRD §15.8 风险对策：数据全空别浪费 API）
+        if (
+          reportTasks.length === 0 &&
+          reportMsgs.length === 0 &&
+          reportPomos.length === 0 &&
+          reportReminders.length === 0
+        ) {
+          return err(params.range === 'daily' ? '今日暂无工作数据（无完成任务/对话/番茄/提醒），无法生成报告' : '本周暂无工作数据（无完成任务/对话/番茄/提醒），无法生成报告')
+        }
+
+        // 5. 调模型生成 Markdown
+        const payload: ReportPayload = {
+          range: params.range,
+          fromSec,
+          toSec,
+          tasks: reportTasks,
+          conversations: reportMsgs,
+          pomodoros: reportPomos,
+          reminders: reportReminders,
+        }
+        const markdown = await generateReport(reportProviderId, payload)
+
+        // 6. 写入笔记库（tag 区分日报/周报，标题带日期）
+        const tag = params.range === 'daily' ? '日报' : '周报'
+        const title = buildReportTitle(params.range, fromSec, toSec)
+        const note = createNote({ title, content: markdown, tags: [tag] })
+
+        return ok({ note })
+      } catch (e) {
+        return err(String(e))
+      }
+    },
+  )
+}
+
+/** 算报告时间范围（Unix 秒，闭区间）。不传则按 range 默认：daily=今日，weekly=本周一到今天。 */
+function computeRange(params: ReportGenerateParams): { fromSec: number; toSec: number } {
+  if (params.fromSec !== undefined && params.toSec !== undefined) {
+    return { fromSec: params.fromSec, toSec: params.toSec }
+  }
+  const now = new Date()
+  // 今天 23:59:59
+  const endOfDay = new Date(now)
+  endOfDay.setHours(23, 59, 59, 999)
+  const toSec = Math.floor(endOfDay.getTime() / 1000)
+
+  if (params.range === 'weekly') {
+    // 本周一 0:00（getDay() 周日=0，周一=1；换算成「距周一的天数」）
+    const dayOfWeek = now.getDay() === 0 ? 6 : now.getDay() - 1 // 周日=6，周一=0
+    const monday = new Date(now)
+    monday.setDate(now.getDate() - dayOfWeek)
+    monday.setHours(0, 0, 0, 0)
+    return { fromSec: Math.floor(monday.getTime() / 1000), toSec }
+  }
+  // daily：今日 0:00
+  const startOfDay = new Date(now)
+  startOfDay.setHours(0, 0, 0, 0)
+  return { fromSec: Math.floor(startOfDay.getTime() / 1000), toSec }
+}
+
+/** 报告笔记标题：日报「日报 2026-08-04」/ 周报「周报 2026-08-04~2026-08-10」。 */
+function buildReportTitle(range: 'daily' | 'weekly', fromSec: number, toSec: number): string {
+  const fmt = (sec: number): string => {
+    const d = new Date(sec * 1000)
+    const y = d.getFullYear()
+    const m = String(d.getMonth() + 1).padStart(2, '0')
+    const day = String(d.getDate()).padStart(2, '0')
+    return `${y}-${m}-${day}`
+  }
+  return range === 'daily' ? `日报 ${fmt(fromSec)}` : `周报 ${fmt(fromSec)}~${fmt(toSec)}`
+}
+
 // ---------- Conversation / Message CRUD（M2，照搬 task 模式） ----------
 function rowToConversation(row: typeof conversations.$inferSelect): Conversation {
   return {
@@ -1270,6 +1433,7 @@ export function registerIpcHandlers() {
   registerConversationHandlers()
   registerDbHandlers()
   registerDashboardHandlers()
+  registerReportHandlers()
   registerMetaHandlers()
   logInfo('[ipc] handlers registered')
 }

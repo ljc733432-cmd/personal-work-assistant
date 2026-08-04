@@ -115,6 +115,7 @@ export interface Task {
   source: TaskSource
   sourceConversationId: string | null // M4 溯源用
   followupLog: string | null // M6 跟进日志
+  completedAt: number | null // v1.8：完成时间戳，status→done 时写，null=未完成
   createdAt: number
   updatedAt: number
 }
@@ -326,4 +327,35 @@ export interface PdfSplitResult {
   ok: boolean
   outputs: string[]
   error?: string
+}
+
+// ---------- Report：AI 日报/周报（v1.8 M17，PRD §15.3④） ----------
+// 报告复用笔记库存储（写成 .md 笔记 + tag=['日报'/'周报']），不建 ReportRecord 表（ADR-025 数据复用优先）。
+// 生成走非流式（ADR-010 范式），providerId 从 settings KV `report.providerId` 读。
+
+/** 报告数据载荷（喂给模型的聚合数据，已在 IPC 层按时间范围过滤 + 截断）。 */
+export interface ReportPayload {
+  range: 'daily' | 'weekly'
+  fromSec: number
+  toSec: number
+  /** 时间范围内完成的任务（done + completedAt 落在区间） */
+  tasks: { title: string; priority: TaskPriority; completedAt: number | null }[]
+  /** 时间范围内的对话消息（role/content，content 已截断） */
+  conversations: { role: 'user' | 'assistant'; content: string; createdAt: number }[]
+  /** 时间范围内的番茄钟（startedAt 落在区间） */
+  pomodoros: { startedAt: number; durationMin: number; completed: boolean }[]
+  /** 时间范围内触发的提醒 */
+  reminders: { time: number; content: string; done: boolean }[]
+}
+
+/** report:generate 入参。不传 fromSec/toSec 时服务端按 range 算默认区间（今日/本周）。 */
+export interface ReportGenerateParams {
+  range: 'daily' | 'weekly'
+  fromSec?: number
+  toSec?: number
+}
+
+/** report:generate 返回。note 为写入笔记库的报告笔记。 */
+export interface ReportResult {
+  note: Note
 }

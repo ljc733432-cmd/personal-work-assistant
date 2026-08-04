@@ -422,7 +422,19 @@ function makeUpdateTaskStatusTool(): ToolRegistration {
         prompt,
         action: async () => {
           const now = Math.floor(Date.now() / 1000)
-          getDb().update(tasks).set({ status, updatedAt: now }).where(eq(tasks.id, taskId)).run()
+          // v1.8：与 task:upsert 同款 completedAt 推导（状态变更类 FC 也要写完成时间）
+          const prevStatus = row.status
+          const completedAt =
+            status === 'done' && prevStatus !== 'done'
+              ? now
+              : status !== 'done' && prevStatus === 'done'
+                ? null
+                : row.completedAt
+          getDb()
+            .update(tasks)
+            .set({ status, completedAt, updatedAt: now })
+            .where(eq(tasks.id, taskId))
+            .run()
           return JSON.stringify({ ok: true, taskId, status })
         },
       }

@@ -97,6 +97,9 @@ export const tasks = sqliteTable('tasks', {
   source: text('source', { enum: ['manual', 'from_chat'] }).notNull().default('manual'),
   sourceConversationId: text('source_conversation_id'), // M4 溯源用，可空
   followupLog: text('followup_log'), // M6 跟进日志，可空
+  // v1.8：完成时间戳（精确「今日完成」用于日报）。status→done 时写，切回非 done 清空。
+  // 老库迁移见 db/index.ts 的幂等 ALTER（项目无 migrate 框架）。
+  completedAt: integer('completed_at', { mode: 'number' }), // Unix 秒，可空
   createdAt: integer('created_at', { mode: 'number' })
     .notNull()
     .default(sql`(unixepoch())`),

@@ -1,4 +1,4 @@
-import { eq, asc, desc } from 'drizzle-orm'
+import { eq, asc, desc, and, gte, lte } from 'drizzle-orm'
 import { getDb } from '../db'
 import { conversations, messages } from '../db/schema'
 import type { Conversation, ConversationMessage } from '../../types'
@@ -60,6 +60,32 @@ export function listMessages(conversationId: string): ConversationMessage[] {
       content: r.content,
       providerId: r.providerId,
       // schema 用 text+json 模式，Drizzle 已 parse；DB 旧数据可能为 null
+      toolCalls: (r.toolCalls ?? null) as ConversationMessage['toolCalls'],
+      attachments: (r.attachments ?? null) as ConversationMessage['attachments'],
+      createdAt: r.createdAt,
+    }))
+}
+
+/**
+ * 列出指定时间范围内的全部消息（跨所有会话，v1.8 日报用）。
+ * 闭区间 [fromSec, toSec]。按时间正序（与 listMessages 同序，createdAt 同秒用 id 兜底）。
+ *
+ * 注意：messages 表只有 idx_messages_conversation_id（按会话建），按时间范围扫全表。
+ * 数据量大时（万条+）可考虑加 idx_messages_created_at，当前规模够用。
+ */
+export function listMessagesInRange(fromSec: number, toSec: number): ConversationMessage[] {
+  return getDb()
+    .select()
+    .from(messages)
+    .where(and(gte(messages.createdAt, fromSec), lte(messages.createdAt, toSec)))
+    .orderBy(asc(messages.createdAt), asc(messages.id))
+    .all()
+    .map((r) => ({
+      id: r.id,
+      conversationId: r.conversationId,
+      role: r.role,
+      content: r.content,
+      providerId: r.providerId,
       toolCalls: (r.toolCalls ?? null) as ConversationMessage['toolCalls'],
       attachments: (r.attachments ?? null) as ConversationMessage['attachments'],
       createdAt: r.createdAt,

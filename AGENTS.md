@@ -116,6 +116,7 @@
 - ❌ **不要绕过 `resolveSafePath`**。所有文件操作（list/read/find/write）的路径必须经它解析，防 `../` 逃逸 + 白名单校验。直接 `fs.readFile(用户给的路径)` 是红线。
 - ❌ **不要静默建任务**。任务抽取只产草稿，必须人工点"加入任务"才入库。
 - ❌ **不要静默丢历史消息**。上下文截断要 UI 提示"已省略较早的 X 条"。
+- ❌ **不要给老库加列而不写幂等迁移**。SQLite `ALTER TABLE ADD COLUMN` **无 IF NOT EXISTS 语法**（与 CREATE TABLE 不同），重复执行报 `duplicate column name`。项目无 drizzle-kit migrate 框架，老库加列必须在 `getDb()` 里用 `PRAGMA table_info(xxx)` 探测列存在性再 ALTER（见 ADR-024，db/index.ts 现有迁移块）。CREATE TABLE IF NOT EXISTS 只对新库生效，老库表已存在不会补列。
 
 ---
 
@@ -132,6 +133,7 @@
 
 ## 8. 当前阶段
 
-- **进度：M1 骨架 + 技术验证**（tracer bullet）
-- M1 目标：electron-vite 跑通 → 接通一家模型 → 流式 → FC 实测 → Drizzle+Electron 落库验证。
-- M2~M7 见 PRD §9，**不在当前范围**。
+- **进度：v1.8 AI 日报/周报已完成**（PRD v1 + v1.2~v1.8 全落地）
+- 已完成里程碑：M1 骨架 / M2 对话 / M3 任务 / M4 抽取 / M5 文件+搜索 / M6 跟进 / M12~M16 v1.2~v1.7 工具+UI / M17 v1.8 日报。
+- **最新打包版**：`release/0.1.2/win-unpacked/个人工作助手.exe`
+- 详细进度见 `docs/项目总结.md` 第七节。下一步候选见该节。

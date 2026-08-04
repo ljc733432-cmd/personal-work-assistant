@@ -195,6 +195,22 @@ PRD §12.2.4 签名元素：无圆角矩形 + 左侧 2px role 色条。
 - user=accent 蓝 / assistant=muted-foreground 灰 / tool=success 绿。
 - 区别于所有圆角气泡的 AI 应用，像精装卷宗条目。
 
+### **completedAt（任务完成时间戳，v1.8）**
+Task 表字段 `completedAt: number | null`（Unix 秒）。`status` 切到 `done` 时写当前时间，切回非 done 清 `null`。
+- **为什么加**：v1.8 日报要「今日完成的任务」，原表只有 `status='done'` 不知何时完成（dashboard charts.tsx 曾注释「用 updatedAt 近似会误导」）。
+- **写入点**：task:upsert（IPC）+ update_task_status（FC 工具），两处都按 prev/next status 推导，与 source/followupLog 同「服务端控制」策略（不入 TaskInput）。
+- **老库迁移**（ADR-024）：SQLite `ALTER TABLE ADD COLUMN` 无 IF NOT EXISTS，项目无 migrate 框架，用 `PRAGMA table_info` 探测后幂等 ALTER。
+- **不要叫**："finishTime/doneAt"——字段名 completedAt 与 status='done' 语义对齐。
+
+### **Report（AI 日报/周报，v1.8 M17，PRD §15.3④）**
+AI 聚合「完成任务 + 对话 + 番茄钟 + 提醒」生成的 Markdown 工作报告。
+- **存储**：写成 .md 笔记存入笔记库，tag=`['日报']`/`['周报']`，标题带日期（`日报 2026-08-04`/`周报 2026-08-04~2026-08-10`）。**不建 ReportRecord 表**（ADR-025 数据复用优先，报告已是结构化笔记）。
+- **生成**：非流式（ADR-010 范式，照搬 taskExtractor），`reportGenerator.ts` + `report:generate` IPC。providerId 从 settings KV `report.providerId` 读（建议便宜模型，报告不需强推理）。
+- **数据聚合**：report:generate IPC 拉 tasks(按 completedAt) + messages(按 createdAt，`listMessagesInRange`) + pomodoros(按 startedAt) + reminders(按 time)。全空拦截避免浪费 API。
+- **生成前数据清单**（PRD §15.8 风险对策）：UI 先展示「将基于以下数据」让用户确认范围。
+- **入口**：工具页 ReportToolbox（照搬 PdfToolbox 骨架，daily/weekly 模式切换 + 历史报告列表）。
+- **不要叫**："总结/汇报/summary"——Report 特指 AI 生成的日报/周报笔记。
+
 ---
 
 ## D3. v1.3 UI 重造域（M13.1~M13.6）
@@ -308,3 +324,5 @@ PRD §7 验收优先级。P0 必做 = v1 完成；P1 可选。
 | 空状态 / 占位 | **EmptyState**（统一组件，Phosphor duotone 大图标） |
 | 首页 / 统计页 / 报表 | **Dashboard**（v1.4 数据看板，历史趋势分析，区别于概览页今日快照） |
 | 路由 / 自动切换 / 分类器 | **ModelTier**（v1.6 模型档位，手动语义分组，不做自动判定） |
+| 总结 / 汇报 / summary | **Report**（v1.8 AI 日报/周报，特指 AI 生成的报告笔记） |
+| finishTime / doneAt | **completedAt**（v1.8 任务完成时间戳，与 status='done' 语义对齐） |
