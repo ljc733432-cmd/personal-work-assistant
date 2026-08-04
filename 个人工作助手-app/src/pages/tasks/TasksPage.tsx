@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useState } from 'react'
-import { Check, Plus, CheckSquare, CaretDown, CaretRight, ArrowRight, Pencil } from '@/components/ui/icons'
+import type { ReactNode } from 'react'
+import { Check, Plus, CheckSquare, CaretDown, CaretRight, ArrowRight, Pencil, AlertCircle, Sun, Bell, CheckCircle2 } from '@/components/ui/icons'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
@@ -7,6 +8,7 @@ import { Textarea } from '@/components/ui/textarea'
 import { Card, CardContent } from '@/components/ui/card'
 import { EmptyState } from '@/components/ui/EmptyState'
 import { useTasksStore } from '@/stores/tasks'
+import { isLogicallyDone } from '@/lib/taskStatus'
 import type { Task, TaskInput, TaskPriority, TaskStatus } from '@/types'
 
 // ---------- 状态/优先级 显示映射 ----------
@@ -34,10 +36,96 @@ const PRIORITY_STYLE: Record<TaskPriority, string> = {
 }
 
 type Filter = 'all' | TaskStatus
+// v1.10.8：智能分组维度（按截止日/按优先级/不分组），默认按截止日
+type GroupBy = 'due' | 'priority' | 'none'
+
+// ---------- v1.10.8：智能分组（纯前端 reduce，零新 IPC/表/字段） ----------
+// 截止日分组 key（顺序即渲染顺序，逾期置顶警示）
+type DueGroupKey = 'overdue' | 'today' | 'tomorrow' | 'thisWeek' | 'later' | 'noDate'
+const DUE_GROUP_ORDER: DueGroupKey[] = ['overdue', 'today', 'tomorrow', 'thisWeek', 'later', 'noDate']
+const DUE_GROUP_LABEL: Record<DueGroupKey, string> = {
+  overdue: '已逾期',
+  today: '今天',
+  tomorrow: '明天',
+  thisWeek: '本周内',
+  later: '更远',
+  noDate: '无截止日',
+}
+// 优先级分组 key（顺序：高→中→低）
+const PRIORITY_GROUP_ORDER: TaskPriority[] = ['high', 'medium', 'low']
+
+interface TaskGroup {
+  key: string
+  label: string
+  tasks: Task[]
+}
+
+// 算任务相对今天的截止分组（复用 formatDueDate 的 diffDays 逻辑，抽纯函数）
+function getDueGroupKey(task: Task): DueGroupKey {
+  if (!task.dueDate) return 'noDate'
+  const diffDays = diffDaysFromToday(task.dueDate)
+  if (diffDays < 0) return 'overdue'
+  if (diffDays === 0) return 'today'
+  if (diffDays === 1) return 'tomorrow'
+  if (diffDays <= 7) return 'thisWeek'
+  return 'later'
+}
+
+// 拆分未完成/已完成（已完成统一沉底）。
+// v1.10.8：用「逻辑完成」判定——根任务+所有子任务全 done 才算完成（isLogicallyDone）。
+// 子任务（parentId 非空）不在此拆分（filtered 只含根任务），仅根任务参与分组/沉底。
+function partitionDone(list: Task[], subtasksByParent: Map<string, Task[]>): { undone: Task[]; done: Task[] } {
+  const undone: Task[] = []
+  const done: Task[] = []
+  for (const t of list) {
+    const subs = subtasksByParent.get(t.id) ?? EMPTY_TASKS
+    if (isLogicallyDone(t, subs)) done.push(t)
+    else undone.push(t)
+  }
+  return { undone, done }
+}
+
+// 按截止日分组（组内排序：逾期按逾期天数降序，其他按截止日升序）
+function groupByDue(undone: Task[]): TaskGroup[] {
+  const buckets = new Map<DueGroupKey, Task[]>()
+  for (const k of DUE_GROUP_ORDER) buckets.set(k, [])
+  for (const t of undone) {
+    buckets.get(getDueGroupKey(t))!.push(t)
+  }
+  for (const [k, arr] of buckets) {
+    arr.sort((a, b) => {
+      const da = a.dueDate ?? Number.MAX_SAFE_INTEGER
+      const db = b.dueDate ?? Number.MAX_SAFE_INTEGER
+      if (k === 'overdue') return da - db // 逾期越早越严重，排前面
+      return da - db // 其他按截止日升序（最近在前）
+    })
+  }
+  return DUE_GROUP_ORDER.filter((k) => (buckets.get(k)?.length ?? 0) > 0).map((k) => ({
+    key: k,
+    label: DUE_GROUP_LABEL[k],
+    tasks: buckets.get(k)!,
+  }))
+}
+
+// 按优先级分组（组内保持 updatedAt 倒序）
+function groupByPriority(undone: Task[]): TaskGroup[] {
+  const buckets = new Map<TaskPriority, Task[]>()
+  for (const p of PRIORITY_GROUP_ORDER) buckets.set(p, [])
+  for (const t of undone) {
+    buckets.get(t.priority)!.push(t)
+  }
+  return PRIORITY_GROUP_ORDER.filter((p) => (buckets.get(p)?.length ?? 0) > 0).map((p) => ({
+    key: p,
+    label: PRIORITY_LABEL[p] + '优先级',
+    tasks: buckets.get(p)!,
+  }))
+}
 
 export function TasksPage() {
   const { tasks, refresh, upsert, remove, createSubtask, promoteSubtask, setParent } = useTasksStore()
   const [filter, setFilter] = useState<Filter>('all')
+  // v1.10.8：分组维度，默认按截止日
+  const [groupBy, setGroupBy] = useState<GroupBy>('due')
   const [editingId, setEditingId] = useState<string | null>(null)
 
   useEffect(() => {
@@ -86,18 +174,49 @@ export function TasksPage() {
 
   const rootTasks = useMemo(() => tasks.filter((t) => t.parentId === null), [tasks])
 
+  // v1.10.8：每个根任务是否「逻辑完成」（自身 done 且所有子任务 done）
+  const logicallyDoneIds = useMemo(() => {
+    const set = new Set<string>()
+    for (const t of rootTasks) {
+      const subs = subtasksByParent.get(t.id) ?? EMPTY_TASKS
+      if (isLogicallyDone(t, subs)) set.add(t.id)
+    }
+    return set
+  }, [rootTasks, subtasksByParent])
+
   const filtered = useMemo(() => {
     if (filter === 'all') return rootTasks
-    return rootTasks.filter((t) => t.status === filter)
-  }, [rootTasks, filter])
+    if (filter === 'done') return rootTasks.filter((t) => logicallyDoneIds.has(t.id))
+    // todo / in_progress：按原始 status，但要排除「逻辑完成」的（根任务 status=done 但逻辑未完成时不应进 todo/in_progress）
+    return rootTasks.filter((t) => t.status === filter && !logicallyDoneIds.has(t.id))
+  }, [rootTasks, filter, logicallyDoneIds])
 
-  // counts 只算根任务（子任务不独立计数，避免重复）
-  const counts = useMemo(() => ({
-    all: rootTasks.length,
-    todo: rootTasks.filter((t) => t.status === 'todo').length,
-    in_progress: rootTasks.filter((t) => t.status === 'in_progress').length,
-    done: rootTasks.filter((t) => t.status === 'done').length,
-  }), [rootTasks])
+  // v1.10.8：分组计算（先 partition done/undone，再对 undone 按维度分组）
+  // 筛选「已完成」时不分组（用户已显式要看完成的，平铺即可）
+  const { undoneView, doneView, groups } = useMemo(() => {
+    if (filter === 'done') {
+      // 筛选已完成：用 status==='done' 原始筛选（filtered 已按 status 过滤），平铺
+      return { undoneView: [], doneView: filtered, groups: [] as TaskGroup[] }
+    }
+    const { undone, done } = partitionDone(filtered, subtasksByParent)
+    if (groupBy === 'none') {
+      return { undoneView: undone, doneView: done, groups: [] as TaskGroup[] }
+    }
+    const gs = groupBy === 'due' ? groupByDue(undone) : groupByPriority(undone)
+    return { undoneView: undone, doneView: done, groups: gs }
+  }, [filtered, groupBy, filter, subtasksByParent])
+
+  // counts 只算根任务（子任务不独立计数，避免重复）。
+  // v1.10.8：done 用逻辑完成（根+子任务全 done），todo/in_progress 按原始 status 但排除逻辑完成的。
+  const counts = useMemo(() => {
+    const done = logicallyDoneIds.size
+    return {
+      all: rootTasks.length,
+      todo: rootTasks.filter((t) => t.status === 'todo' && !logicallyDoneIds.has(t.id)).length,
+      in_progress: rootTasks.filter((t) => t.status === 'in_progress' && !logicallyDoneIds.has(t.id)).length,
+      done,
+    }
+  }, [rootTasks, logicallyDoneIds])
 
   return (
     <div className="h-full overflow-y-auto">
@@ -113,12 +232,24 @@ export function TasksPage() {
           </div>
         </header>
 
-        {/* 筛选条 */}
-        <div className="flex flex-wrap gap-1.5">
+        {/* 筛选条 + 分组控制（v1.10.8：右侧加维度下拉）*/}
+        <div className="flex flex-wrap items-center gap-1.5">
           <FilterBtn active={filter === 'all'} onClick={() => setFilter('all')} label={`全部 ${counts.all}`} />
           <FilterBtn active={filter === 'todo'} onClick={() => setFilter('todo')} label={`待办 ${counts.todo}`} />
           <FilterBtn active={filter === 'in_progress'} onClick={() => setFilter('in_progress')} label={`进行中 ${counts.in_progress}`} />
           <FilterBtn active={filter === 'done'} onClick={() => setFilter('done')} label={`已完成 ${counts.done}`} />
+          <div className="ml-auto flex items-center gap-1.5">
+            <span className="text-[11px] text-muted-foreground">分组</span>
+            <select
+              value={groupBy}
+              onChange={(e) => setGroupBy(e.target.value as GroupBy)}
+              className="h-7 rounded-md border border-input bg-background px-2 text-xs"
+            >
+              <option value="due">按截止日</option>
+              <option value="priority">按优先级</option>
+              <option value="none">不分组</option>
+            </select>
+          </div>
         </div>
 
         {filtered.length === 0 && (
@@ -129,40 +260,74 @@ export function TasksPage() {
           />
         )}
 
-        {/* 任务列表（v1.5：stagger 错峰入场）*/}
-        <div className="stagger-fade-up space-y-3">
-          {filtered.map((t) => (
-            <TaskCard
-              key={t.id}
-              task={t}
-              subtasks={subtasksByParent.get(t.id) ?? EMPTY_TASKS}
-              allRootTasks={rootTasks}
-              editing={editingId === t.id}
-              onEdit={() => setEditingId(editingId === t.id ? null : t.id)}
-              onSave={(input) => {
-                upsert(input)
-                setEditingId(null)
-              }}
-              onToggleDone={() =>
-                upsert({ id: t.id, title: t.title, status: t.status === 'done' ? 'todo' : 'done' })
-              }
-              onDelete={() => handleDeleteRoot(t, subtasksByParent.get(t.id)?.length ?? 0)}
-              onAddSubtask={(title) => createSubtask({ parentId: t.id, title })}
-              onToggleSubtaskDone={(sub) =>
-                handleSubtaskToggle(t, sub, subtasksByParent.get(t.id) ?? EMPTY_TASKS)
-              }
-              onDeleteSubtask={(sub) => remove({ id: sub.id })}
-              onPromoteSubtask={(sub) => promoteSubtask(sub.id)}
-              onEditSubtask={(sub, title) => upsert({ id: sub.id, title })}
-              onSetParent={(id, parentId) => setParent(id, parentId)}
-            />
-          ))}
-        </div>
+        {/* v1.10.8：分组模式渲染——按维度分区块 + 已完成折叠到底部 */}
+        {groups.length > 0 ? (
+          <div className="space-y-6">
+            {groups.map((g) => (
+              <section key={g.key} className="animate-fade-up space-y-2">
+                <GroupHeader groupKey={g.key} label={g.label} count={g.tasks.length} groupBy={groupBy} />
+                <div className="stagger-fade-up space-y-3">
+                  {g.tasks.map((t) => renderTaskCard(t))}
+                </div>
+              </section>
+            ))}
+            {doneView.length > 0 && (
+              <DoneSection tasks={doneView} renderTaskCard={renderTaskCard} />
+            )}
+          </div>
+        ) : (
+          /* 无分组模式：未完成平铺 + 已完成折叠到底部（筛选「已完成」时 doneView 就是全部，平铺） */
+          <>
+            {undoneView.length > 0 && (
+              <div className="stagger-fade-up space-y-3">
+                {undoneView.map((t) => renderTaskCard(t))}
+              </div>
+            )}
+            {filter !== 'done' && doneView.length > 0 && (
+              <DoneSection tasks={doneView} renderTaskCard={renderTaskCard} />
+            )}
+            {filter === 'done' && doneView.length > 0 && (
+              <div className="stagger-fade-up space-y-3">
+                {doneView.map((t) => renderTaskCard(t))}
+              </div>
+            )}
+          </>
+        )}
 
         <AddTaskCard onAdd={(input) => upsert(input)} />
       </div>
     </div>
   )
+
+  // v1.10.8：渲染单个 TaskCard（抽出来避免分组/平铺/已完成三处重复写一大坨 props）
+  function renderTaskCard(t: Task) {
+    return (
+      <TaskCard
+        key={t.id}
+        task={t}
+        subtasks={subtasksByParent.get(t.id) ?? EMPTY_TASKS}
+        allRootTasks={rootTasks}
+        editing={editingId === t.id}
+        onEdit={() => setEditingId(editingId === t.id ? null : t.id)}
+        onSave={(input) => {
+          upsert(input)
+          setEditingId(null)
+        }}
+        onToggleDone={() =>
+          upsert({ id: t.id, title: t.title, status: t.status === 'done' ? 'todo' : 'done' })
+        }
+        onDelete={() => handleDeleteRoot(t, subtasksByParent.get(t.id)?.length ?? 0)}
+        onAddSubtask={(title) => createSubtask({ parentId: t.id, title })}
+        onToggleSubtaskDone={(sub) =>
+          handleSubtaskToggle(t, sub, subtasksByParent.get(t.id) ?? EMPTY_TASKS)
+        }
+        onDeleteSubtask={(sub) => remove({ id: sub.id })}
+        onPromoteSubtask={(sub) => promoteSubtask(sub.id)}
+        onEditSubtask={(sub, title) => upsert({ id: sub.id, title })}
+        onSetParent={(id, parentId) => setParent(id, parentId)}
+      />
+    )
+  }
 }
 
 // 模块级空数组保证引用稳定（避免 zustand selector 返回内联数组陷阱）
@@ -182,6 +347,85 @@ function FilterBtn({ active, onClick, label }: { active: boolean; onClick: () =>
     >
       {label}
     </button>
+  )
+}
+
+// ---------- v1.10.8：分组标题（语义色：逾期=红警示，今天=橙提醒，其他=灰） ----------
+function GroupHeader({
+  groupKey,
+  label,
+  count,
+  groupBy,
+}: {
+  groupKey: string
+  label: string
+  count: number
+  groupBy: GroupBy
+}) {
+  // 截止日维度：逾期红 / 今天橙 / 明天提醒蓝，其他灰
+  // 优先级维度：高红 / 中橙 / 低灰
+  let Icon = Bell
+  let color = 'text-muted-foreground'
+  if (groupBy === 'due') {
+    if (groupKey === 'overdue') {
+      Icon = AlertCircle
+      color = 'text-danger'
+    } else if (groupKey === 'today') {
+      Icon = Sun
+      color = 'text-warning'
+    } else if (groupKey === 'tomorrow') {
+      Icon = Bell
+      color = 'text-info'
+    } else if (groupKey === 'noDate') {
+      Icon = Bell
+      color = 'text-muted-foreground'
+    } else {
+      Icon = Bell
+      color = 'text-muted-foreground'
+    }
+  } else if (groupBy === 'priority') {
+    if (groupKey === 'high') {
+      Icon = AlertCircle
+      color = 'text-danger'
+    } else if (groupKey === 'medium') {
+      Icon = Bell
+      color = 'text-warning'
+    } else {
+      Icon = Bell
+      color = 'text-muted-foreground'
+    }
+  }
+  return (
+    <div className={`flex items-center gap-1.5 text-xs font-medium ${color}`}>
+      <Icon size={13} weight="duotone" />
+      <span>{label}</span>
+      <span className={color}>{count}</span>
+    </div>
+  )
+}
+
+// ---------- v1.10.8：已完成折叠区（沉到底部，默认折叠） ----------
+function DoneSection({
+  tasks,
+  renderTaskCard,
+}: {
+  tasks: Task[]
+  renderTaskCard: (t: Task) => ReactNode
+}) {
+  const [open, setOpen] = useState(false)
+  return (
+    <section className="space-y-2 border-t border-border pt-4">
+      <button
+        onClick={() => setOpen((v) => !v)}
+        className="flex items-center gap-1.5 text-xs font-medium text-muted-foreground transition-colors hover:text-foreground"
+      >
+        {open ? <CaretDown size={12} /> : <CaretRight size={12} />}
+        <CheckCircle2 size={13} weight="duotone" className="text-success" />
+        <span>已完成</span>
+        <span>{tasks.length}</span>
+      </button>
+      {open && <div className="stagger-fade-up space-y-3">{tasks.map(renderTaskCard)}</div>}
+    </section>
   )
 }
 
@@ -336,8 +580,9 @@ function TaskCard({
     )
   }
 
-  // 展示态
-  const done = task.status === 'done'
+  // 展示态。v1.10.8：done 用「逻辑完成」（根+所有子任务全 done），与分组判定一致，
+  // 避免根任务 status=done 但子任务未完成时显示已勾选却在未完成组的矛盾。
+  const done = isLogicallyDone(task, subtasks)
   const doneSubCount = subtasks.filter((s) => s.status === 'done').length
   return (
     <Card className={`transition-all duration-200 hover:-translate-y-0.5 hover:shadow-md ${done ? 'opacity-60' : ''}`}>
@@ -629,14 +874,20 @@ function fromDateInput(yyyy_mm_dd: string): number {
 }
 function formatDueDate(unixSec: number): string {
   const d = new Date(unixSec * 1000)
-  const now = new Date()
-  const today = new Date(now.getFullYear(), now.getMonth(), now.getDate())
-  const target = new Date(d.getFullYear(), d.getMonth(), d.getDate())
-  const diffDays = Math.round((target.getTime() - today.getTime()) / 86400000)
+  const diffDays = diffDaysFromToday(unixSec)
   const dateStr = `${d.getMonth() + 1}月${d.getDate()}日`
   if (diffDays === 0) return `今天（${dateStr}）`
   if (diffDays === 1) return `明天（${dateStr}）`
   if (diffDays < 0) return `已逾期 ${Math.abs(diffDays)} 天（${dateStr}）`
   if (diffDays <= 7) return `${diffDays} 天后（${dateStr}）`
   return dateStr
+}
+
+// v1.10.8：截止日相对今天的天数差（负=逾期，0=今天），抽公共给 getDueGroupKey 和 formatDueDate 共用
+function diffDaysFromToday(unixSec: number): number {
+  const d = new Date(unixSec * 1000)
+  const now = new Date()
+  const today = new Date(now.getFullYear(), now.getMonth(), now.getDate())
+  const target = new Date(d.getFullYear(), d.getMonth(), d.getDate())
+  return Math.round((target.getTime() - today.getTime()) / 86400000)
 }

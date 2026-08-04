@@ -157,6 +157,20 @@ export function getDb(): BetterSQLite3Database<typeof schema> {
     logInfo('[db] 迁移：tasks 已加列 parent_id')
   }
 
+  // v1.10.8 数据修复：清除孤儿子任务（parent_id 指向已不存在的任务）。
+  // 成因：早期 task:delete 未强制级联删子任务，删根任务后子任务变孤儿残留。
+  // 幂等——无孤儿时 DELETE 0 行，每次启动跑无副作用。
+  const orphanResult = _raw
+    .prepare(
+      `DELETE FROM tasks
+       WHERE parent_id IS NOT NULL
+         AND parent_id NOT IN (SELECT id FROM tasks)`,
+    )
+    .run()
+  if (orphanResult.changes > 0) {
+    logInfo(`[db] 数据修复：已清除 ${orphanResult.changes} 条孤儿子任务`)
+  }
+
   _db = drizzle(_raw, { schema })
   logInfo('[db] 已初始化：', dbPath)
   return _db

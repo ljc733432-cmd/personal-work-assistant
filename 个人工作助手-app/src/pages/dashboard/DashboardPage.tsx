@@ -1,9 +1,9 @@
 import { useEffect, useMemo, useState } from 'react'
-import { Sparkles, Timer, CheckSquare, StickyNote, MessageSquare } from '@/components/ui/icons'
+import { Sparkles, Timer, CheckSquare, StickyNote, MessageSquare, TrendUp, TrendDown, Minus } from '@/components/ui/icons'
 import { Card, CardContent } from '@/components/ui/card'
-import { Sparkline } from '@/components/ui/Sparkline'
 import { useDashboardStore } from '@/stores/dashboard'
 import { useCountUp } from '@/lib/useCountUp'
+import { computeLogicallyDoneIds } from '@/lib/taskStatus'
 import { useNavigate } from '@/pages/overview/nav'
 import {
   FocusTrendChart,
@@ -89,7 +89,12 @@ export function DashboardPage() {
     () => pomodoro.filter((s) => s.startedAt >= fromSec),
     [pomodoro, fromSec],
   )
-  const tasksInRange = useMemo(() => tasks.filter((t) => t.createdAt >= fromSec), [tasks, fromSec])
+  // v1.10.8：只算根任务（子任务不独立计数，与任务页/概览页口径一致）。
+  // 子任务是根任务的组成部分，独立计数会导致「总数对不上」。
+  const tasksInRange = useMemo(
+    () => tasks.filter((t) => t.parentId === null && t.createdAt >= fromSec),
+    [tasks, fromSec],
+  )
   const notesInRange = useMemo(() => notes.filter((n) => n.createdAt >= fromSec), [notes, fromSec])
 
   // 指标计算
@@ -99,7 +104,10 @@ export function DashboardPage() {
   const completedCount = pomodoroInRange.filter((s) => s.completed).length
   const interruptedCount = pomodoroInRange.filter((s) => !s.completed).length
 
-  const doneTasks = tasksInRange.filter((t) => t.status === 'done').length
+  // v1.10.8：doneTasks 用「逻辑完成」判定（根+所有子任务全 done）。
+  // computeLogicallyDoneIds 基于全量 tasks 算（需完整子任务索引），再与时间范围取交集。
+  const logicallyDoneIds = useMemo(() => computeLogicallyDoneIds(tasks), [tasks])
+  const doneTasks = tasksInRange.filter((t) => logicallyDoneIds.has(t.id)).length
   const completionRate =
     tasksInRange.length > 0 ? Math.round((doneTasks / tasksInRange.length) * 100) : 0
 
@@ -177,52 +185,56 @@ export function DashboardPage() {
     return buckets
   }, [pomodoroInRange])
 
-  // StatCard sparkline 数据（最近 7 天，无论 range 是什么，固定展示近 7 天趋势）
+  // StatCard 趋势数据（v1.10.8：近 7 天 vs 前 7 天，算百分比变化，替代裸 sparkline）
   const sevenDaysAgo = useMemo(() => {
     const d = new Date()
     d.setHours(0, 0, 0, 0)
     d.setDate(d.getDate() - 6)
     return Math.floor(d.getTime() / 1000)
   }, [])
+  const fourteenDaysAgo = useMemo(() => {
+    const d = new Date()
+    d.setHours(0, 0, 0, 0)
+    d.setDate(d.getDate() - 13)
+    return Math.floor(d.getTime() / 1000)
+  }, [])
 
-  const sparks = useMemo(() => {
-    const days: string[] = []
-    const startDay = new Date(sevenDaysAgo * 1000)
-    startDay.setHours(0, 0, 0, 0)
-    for (let d = new Date(startDay); d <= new Date(); d.setDate(d.getDate() + 1)) {
-      days.push(toDateLabel(Math.floor(d.getTime() / 1000)))
+  // 趋势类型（模块级定义，StatCard/TrendBadge 共用）
+  // pct=null 表示前7天无数据（显示「新增」而非百分比）
+
+  // 算一组值的趋势：currentSum（近7天）/ previousSum（前7天）
+  function computeTrend(currentSum: number, previousSum: number): TrendInfo {
+    if (previousSum === 0) {
+      return { pct: null, dir: currentSum > 0 ? 'up' : 'flat' }
     }
-    // 专注分钟/天
-    const focusMap = new Map<string, number>()
-    for (const s of pomodoro) {
-      if (!s.completed || s.startedAt < sevenDaysAgo) continue
-      const k = toDateLabel(s.startedAt)
-      focusMap.set(k, (focusMap.get(k) ?? 0) + s.durationMin)
-    }
-    // 任务新建/天
-    const taskMap = new Map<string, number>()
-    for (const t of tasks) {
-      if (t.createdAt < sevenDaysAgo) continue
-      const k = toDateLabel(t.createdAt)
-      taskMap.set(k, (taskMap.get(k) ?? 0) + 1)
-    }
-    // 笔记新增/天
-    const noteMap = new Map<string, number>()
-    for (const n of notes) {
-      if (n.createdAt < sevenDaysAgo) continue
-      const k = toDateLabel(n.createdAt)
-      noteMap.set(k, (noteMap.get(k) ?? 0) + 1)
-    }
-    // 消息/天（activity 已是按天聚合，但范围可能不含全部 7 天，用 activity 补）
-    const msgMap = new Map<string, number>()
-    for (const a of activity) msgMap.set(a.date, a.count)
+    const pct = Math.round(((currentSum - previousSum) / previousSum) * 100)
+    return { pct, dir: pct > 0 ? 'up' : pct < 0 ? 'down' : 'flat' }
+  }
+
+  const trends = useMemo(() => {
+    // 近7天 / 前7天 各指标总和
+    const sum = (arr: { ts: number; val: number }[], from: number, to: number) =>
+      arr.filter((x) => x.ts >= from && x.ts < to).reduce((s, x) => s + x.val, 0)
+
+    const focusData = pomodoro
+      .filter((s) => s.completed)
+      .map((s) => ({ ts: s.startedAt, val: s.durationMin }))
+    const taskData = tasks
+      .filter((t) => !t.parentId && t.completedAt)
+      .map((t) => ({ ts: t.completedAt as number, val: 1 }))
+    const noteData = notes.map((n) => ({ ts: n.createdAt, val: 1 }))
+    const msgData = activity.map((a) => ({
+      ts: Math.floor(new Date(a.date).getTime() / 1000),
+      val: a.count,
+    }))
+
     return {
-      focus: days.map((d) => focusMap.get(d) ?? 0),
-      task: days.map((d) => taskMap.get(d) ?? 0),
-      note: days.map((d) => noteMap.get(d) ?? 0),
-      msg: days.map((d) => msgMap.get(d) ?? 0),
+      focus: computeTrend(sum(focusData, sevenDaysAgo, Date.now() / 1000), sum(focusData, fourteenDaysAgo, sevenDaysAgo)),
+      task: computeTrend(sum(taskData, sevenDaysAgo, Date.now() / 1000), sum(taskData, fourteenDaysAgo, sevenDaysAgo)),
+      note: computeTrend(sum(noteData, sevenDaysAgo, Date.now() / 1000), sum(noteData, fourteenDaysAgo, sevenDaysAgo)),
+      msg: computeTrend(sum(msgData, sevenDaysAgo, Date.now() / 1000), sum(msgData, fourteenDaysAgo, sevenDaysAgo)),
     }
-  }, [pomodoro, tasks, notes, activity, sevenDaysAgo])
+  }, [pomodoro, tasks, notes, activity, sevenDaysAgo, fourteenDaysAgo])
 
   return (
     <div className="h-full overflow-y-auto">
@@ -278,7 +290,7 @@ export function DashboardPage() {
               />
             </section>
 
-            {/* StatCard 网格（v1.5：count-up + hover + sparkline）*/}
+            {/* StatCard 网格（v1.10.8：count-up + hover + 趋势徽标，替代裸 sparkline）*/}
             <section className="mb-8 grid grid-cols-2 gap-4 stagger-fade-up lg:grid-cols-4">
               <StatCard
                 icon={Timer}
@@ -291,7 +303,7 @@ export function DashboardPage() {
                     : '暂无番茄钟记录'
                 }
                 tone="success"
-                spark={sparks.focus}
+                trend={trends.focus}
               />
               <StatCard
                 icon={CheckSquare}
@@ -302,7 +314,7 @@ export function DashboardPage() {
                   tasksInRange.length > 0 ? `完成率 ${completionRate}%` : '该时段无任务'
                 }
                 tone="info"
-                spark={sparks.task}
+                trend={trends.task}
               />
               <StatCard
                 icon={StickyNote}
@@ -310,7 +322,7 @@ export function DashboardPage() {
                 value={notesInRange.length}
                 hint={notesInRange.length > 0 ? '篇笔记' : '暂无新笔记'}
                 tone="accent"
-                spark={sparks.note}
+                trend={trends.note}
               />
               <StatCard
                 icon={MessageSquare}
@@ -318,7 +330,7 @@ export function DashboardPage() {
                 value={messageCount}
                 hint={messageCount > 0 ? `${activity.length} 天有活跃` : '暂无对话'}
                 tone="warning"
-                spark={sparks.msg}
+                trend={trends.msg}
               />
             </section>
 
@@ -406,6 +418,8 @@ function QuickAction({
 }
 
 type Tone = 'info' | 'success' | 'warning' | 'accent'
+// v1.10.8：趋势信息（近7天 vs 前7天）。pct=null 表示前7天无数据。
+type TrendInfo = { pct: number | null; dir: 'up' | 'down' | 'flat' }
 const TONE_STYLE: Record<Tone, { bg: string; text: string }> = {
   info: { bg: 'bg-info/10', text: 'text-info' },
   success: { bg: 'bg-success/10', text: 'text-success' },
@@ -420,7 +434,7 @@ function StatCard({
   unit,
   hint,
   tone,
-  spark,
+  trend,
 }: {
   icon: typeof Timer
   label: string
@@ -428,14 +442,14 @@ function StatCard({
   unit?: string
   hint: string
   tone: Tone
-  spark?: number[]
+  trend?: TrendInfo
 }) {
   const t = TONE_STYLE[tone]
   const animated = useCountUp(value)
   return (
     <Card className="p-5 transition-all duration-200 hover:-translate-y-1 hover:shadow-lg">
       <CardContent className="flex items-start justify-between p-0">
-        <div className="min-w-0">
+        <div className="min-w-0 flex-1">
           <div className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
             {label}
           </div>
@@ -443,17 +457,39 @@ function StatCard({
             <span className="font-display text-3xl font-semibold tabular-nums">{animated}</span>
             {unit && <span className="text-sm text-muted-foreground">{unit}</span>}
           </div>
-          <div className="mt-1 truncate text-xs text-muted-foreground">{hint}</div>
-        </div>
-        <div className="flex flex-col items-end gap-1">
-          <div className={`flex h-10 w-10 flex-shrink-0 items-center justify-center rounded-lg ${t.bg}`}>
-            <Icon size={20} weight="duotone" className={t.text} />
+          <div className="mt-1 flex items-center gap-2">
+            <span className="truncate text-xs text-muted-foreground">{hint}</span>
+            {trend && <TrendBadge trend={trend} />}
           </div>
-          {spark && spark.length >= 2 && (
-            <Sparkline data={spark} className="opacity-80" />
-          )}
+        </div>
+        <div className={`flex h-10 w-10 flex-shrink-0 items-center justify-center rounded-lg ${t.bg}`}>
+          <Icon size={20} weight="duotone" className={t.text} />
         </div>
       </CardContent>
     </Card>
+  )
+}
+
+// v1.10.8：趋势徽标（替代裸 sparkline）。近7天 vs 前7天的百分比变化。
+// ↑ 绿（增长）/ ↓ 红（下降）/ → 灰（持平）/ 新增 灰（前7天无数据）。
+// 裸折线无上下文用户以为出 bug（NN/g、PatternFly 共识：sparkline 必须配标签）。
+function TrendBadge({ trend }: { trend: TrendInfo }) {
+  const { pct, dir } = trend
+  if (pct === null) {
+    // 前7天无数据
+    if (dir === 'flat') return null // 近7天也0，不显示
+    return (
+      <span className="flex flex-shrink-0 items-center gap-0.5 text-[10px] font-medium text-muted-foreground">
+        <TrendUp size={11} weight="bold" /> 新增
+      </span>
+    )
+  }
+  const color = dir === 'up' ? 'text-success' : dir === 'down' ? 'text-danger' : 'text-muted-foreground'
+  const Icon = dir === 'up' ? TrendUp : dir === 'down' ? TrendDown : Minus
+  const sign = pct > 0 ? '+' : ''
+  return (
+    <span className={`flex flex-shrink-0 items-center gap-0.5 text-[10px] font-medium ${color}`}>
+      <Icon size={11} weight="bold" /> {sign}{pct}%
+    </span>
   )
 }

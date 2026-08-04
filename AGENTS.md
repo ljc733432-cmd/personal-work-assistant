@@ -117,6 +117,7 @@
 - ❌ **不要静默建任务**。任务抽取只产草稿，必须人工点"加入任务"才入库。
 - ❌ **不要静默丢历史消息**。上下文截断要 UI 提示"已省略较早的 X 条"。
 - ❌ **不要给老库加列而不写幂等迁移**。SQLite `ALTER TABLE ADD COLUMN` **无 IF NOT EXISTS 语法**（与 CREATE TABLE 不同），重复执行报 `duplicate column name`。项目无 drizzle-kit migrate 框架，老库加列必须在 `getDb()` 里用 `PRAGMA table_info(xxx)` 探测列存在性再 ALTER（见 ADR-024，db/index.ts 现有迁移块）。CREATE TABLE IF NOT EXISTS 只对新库生效，老库表已存在不会补列。
+- ❌ **不要让删除类操作依赖调用方传级联标志**。删除有从属关系的数据（如任务 parent_id）时，服务端 handler 必须自我保护——先删所有指向自己的从属记录再删自己。靠前端「记得传 cascade:true」不可靠，任何漏传路径都会留孤儿数据（v1.10.8 孤儿子任务坑：删根任务后子任务变孤儿，任务页不显示但概览/看板统计仍计入，表现为「删了还在」）。cascade 标志只用于前端确认框，删除本身必须强制清理后代。
 
 ---
 

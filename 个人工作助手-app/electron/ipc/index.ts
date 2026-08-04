@@ -742,10 +742,10 @@ function registerTaskHandlers() {
   ipcMain.handle('task:delete', (_, params: TaskDeleteParams): IpcResult<true> => {
     try {
       const db = getDb()
-      // v1.10.1：cascade=true 时级联删子任务（删根任务场景）。子任务删除无子任务，无需级联。
-      if (params.cascade) {
-        db.delete(tasks).where(eq(tasks.parentId, params.id)).run()
-      }
+      // v1.10.8：服务端总是级联删子任务（不再依赖 cascade 参数）。
+      // cascade 参数保留给前端做「是否弹确认框」用，但删除本身必须清理后代，
+      // 否则父任务删了子任务变孤儿残留数据库（曾出现孤儿导致概览/看板统计对不上）。
+      db.delete(tasks).where(eq(tasks.parentId, params.id)).run()
       db.delete(tasks).where(eq(tasks.id, params.id)).run()
       return ok(true)
     } catch (e) {
