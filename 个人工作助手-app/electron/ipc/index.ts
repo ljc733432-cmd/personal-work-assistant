@@ -707,10 +707,12 @@ function registerTaskHandlers() {
         db.update(tasks)
           .set({
             title: input.title,
-            description: input.description ?? null,
+            // v1.10.6：未传的字段用 existing 兜底（避免子任务 inline 改标题时
+            //   误清 description/dueDate）。原写法 input.x ?? null 会把未传字段清空。
+            description: input.description !== undefined ? input.description : existing.description,
             status: input.status ?? existing.status,
             priority: input.priority ?? existing.priority,
-            dueDate: input.dueDate ?? null,
+            dueDate: input.dueDate !== undefined ? input.dueDate : existing.dueDate,
             completedAt,
             updatedAt: now,
           })
