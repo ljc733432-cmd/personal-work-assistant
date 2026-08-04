@@ -67,6 +67,7 @@ import type {
   TaskDraft,
   TaskDraftInput,
   TaskFromNoteInput,
+  TaskSubtaskInput,
   Reminder,
   ReminderInput,
   PomodoroSession,
@@ -666,6 +667,7 @@ function rowToTask(row: typeof tasks.$inferSelect): Task {
     source: row.source,
     sourceConversationId: row.sourceConversationId,
     sourceNotePath: row.sourceNotePath,
+    parentId: row.parentId,
     followupLog: row.followupLog,
     completedAt: row.completedAt,
     createdAt: row.createdAt,
@@ -807,6 +809,33 @@ function registerTaskHandlers() {
           dueDate: input.dueDate ?? null,
           source: 'from_note',
           sourceNotePath: note.fileName, // 溯源（笔记库内 fileName 唯一稳定）
+        })
+        .run()
+      const row = db.select().from(tasks).where(eq(tasks.id, id)).get()!
+      return ok(rowToTask(row))
+    } catch (e) {
+      return err(String(e))
+    }
+  })
+
+  // v1.10：子任务（两级层级，PRD 用户需求）。与 create_from_draft/note 平行。
+  // source 跟随父任务（服务端查父任务后填，保持溯源一致），status 恒 todo，parentId 填入参。
+  // 两级限制：UI 不给子任务再加子任务的入口（但后端不强制——数据层允许，前端约束）。
+  ipcMain.handle('task:create_subtask', (_, input: TaskSubtaskInput): IpcResult<Task> => {
+    try {
+      const db = getDb()
+      const parent = db.select().from(tasks).where(eq(tasks.id, input.parentId)).get()
+      if (!parent) return err('父任务不存在')
+      const id = randomUUID()
+      db.insert(tasks)
+        .values({
+          id,
+          title: input.title,
+          status: 'todo',
+          priority: input.priority ?? 'medium',
+          dueDate: input.dueDate ?? null,
+          source: parent.source, // 跟随父任务溯源
+          parentId: input.parentId,
         })
         .run()
       const row = db.select().from(tasks).where(eq(tasks.id, id)).get()!

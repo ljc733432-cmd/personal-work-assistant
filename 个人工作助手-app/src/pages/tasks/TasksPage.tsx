@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from 'react'
-import { Check, Plus, CheckSquare } from '@/components/ui/icons'
+import { Check, Plus, CheckSquare, CaretDown, CaretRight } from '@/components/ui/icons'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
@@ -36,7 +36,7 @@ const PRIORITY_STYLE: Record<TaskPriority, string> = {
 type Filter = 'all' | TaskStatus
 
 export function TasksPage() {
-  const { tasks, refresh, upsert, remove } = useTasksStore()
+  const { tasks, refresh, upsert, remove, createSubtask } = useTasksStore()
   const [filter, setFilter] = useState<Filter>('all')
   const [editingId, setEditingId] = useState<string | null>(null)
 
@@ -44,17 +44,33 @@ export function TasksPage() {
     refresh()
   }, [refresh])
 
-  const filtered = useMemo(() => {
-    if (filter === 'all') return tasks
-    return tasks.filter((t) => t.status === filter)
-  }, [tasks, filter])
+  // v1.10：数据分组——根任务 + 子任务按父 id 索引（数据量小，前端 reduce）
+  const subtasksByParent = useMemo(() => {
+    const map = new Map<string, Task[]>()
+    for (const t of tasks) {
+      if (t.parentId) {
+        const arr = map.get(t.parentId) ?? []
+        arr.push(t)
+        map.set(t.parentId, arr)
+      }
+    }
+    return map
+  }, [tasks])
 
+  const rootTasks = useMemo(() => tasks.filter((t) => t.parentId === null), [tasks])
+
+  const filtered = useMemo(() => {
+    if (filter === 'all') return rootTasks
+    return rootTasks.filter((t) => t.status === filter)
+  }, [rootTasks, filter])
+
+  // counts 只算根任务（子任务不独立计数，避免重复）
   const counts = useMemo(() => ({
-    all: tasks.length,
-    todo: tasks.filter((t) => t.status === 'todo').length,
-    in_progress: tasks.filter((t) => t.status === 'in_progress').length,
-    done: tasks.filter((t) => t.status === 'done').length,
-  }), [tasks])
+    all: rootTasks.length,
+    todo: rootTasks.filter((t) => t.status === 'todo').length,
+    in_progress: rootTasks.filter((t) => t.status === 'in_progress').length,
+    done: rootTasks.filter((t) => t.status === 'done').length,
+  }), [rootTasks])
 
   return (
     <div className="h-full overflow-y-auto">
@@ -65,7 +81,7 @@ export function TasksPage() {
           <div className="relative animate-fade-up">
             <h1 className="font-display text-2xl font-semibold tracking-tight">任务</h1>
             <p className="mt-1 text-sm text-muted-foreground">
-              手动管理待办。将来 AI 可从对话抽取任务（M4），到点主动跟进（M6）。
+              手动管理待办。支持子任务（两级）、来源溯源、AI 抽取与跟进。
             </p>
           </div>
         </header>
@@ -92,6 +108,7 @@ export function TasksPage() {
             <TaskCard
               key={t.id}
               task={t}
+              subtasks={subtasksByParent.get(t.id) ?? EMPTY_TASKS}
               editing={editingId === t.id}
               onEdit={() => setEditingId(editingId === t.id ? null : t.id)}
               onSave={(input) => {
@@ -102,6 +119,11 @@ export function TasksPage() {
                 upsert({ id: t.id, title: t.title, status: t.status === 'done' ? 'todo' : 'done' })
               }
               onDelete={() => remove(t.id)}
+              onAddSubtask={(title) => createSubtask({ parentId: t.id, title })}
+              onToggleSubtaskDone={(sub) =>
+                upsert({ id: sub.id, title: sub.title, status: sub.status === 'done' ? 'todo' : 'done' })
+              }
+              onDeleteSubtask={(sub) => remove(sub.id)}
             />
           ))}
         </div>
@@ -111,6 +133,9 @@ export function TasksPage() {
     </div>
   )
 }
+
+// 模块级空数组保证引用稳定（避免 zustand selector 返回内联数组陷阱）
+const EMPTY_TASKS: Task[] = []
 
 // ---------- 筛选按钮 ----------
 function FilterBtn({ active, onClick, label }: { active: boolean; onClick: () => void; label: string }) {
@@ -145,21 +170,29 @@ function PriorityBadge({ priority }: { priority: TaskPriority }) {
   )
 }
 
-// ---------- 单个任务卡片 ----------
+// ---------- 单个任务卡片（根任务，v1.10 含子任务区） ----------
 function TaskCard({
   task,
+  subtasks,
   editing,
   onEdit,
   onSave,
   onToggleDone,
   onDelete,
+  onAddSubtask,
+  onToggleSubtaskDone,
+  onDeleteSubtask,
 }: {
   task: Task
+  subtasks: Task[]
   editing: boolean
   onEdit: () => void
   onSave: (input: TaskInput) => void
   onToggleDone: () => void
   onDelete: () => void
+  onAddSubtask: (title: string) => void
+  onToggleSubtaskDone: (sub: Task) => void
+  onDeleteSubtask: (sub: Task) => void
 }) {
   // 编辑态字段
   const [title, setTitle] = useState(task.title)
@@ -167,6 +200,10 @@ function TaskCard({
   const [status, setStatus] = useState<TaskStatus>(task.status)
   const [priority, setPriority] = useState<TaskPriority>(task.priority)
   const [dueDate, setDueDate] = useState(task.dueDate ? toDateInput(task.dueDate) : '')
+  // v1.10：子任务区折叠态（默认展开若有子任务）
+  const [subOpen, setSubOpen] = useState(subtasks.length > 0)
+  const [subInput, setSubInput] = useState('')
+  const [addingSub, setAddingSub] = useState(false)
 
   // 进入编辑态时同步字段（处理切到不同任务编辑）
   useEffect(() => {
@@ -178,6 +215,11 @@ function TaskCard({
       setDueDate(task.dueDate ? toDateInput(task.dueDate) : '')
     }
   }, [editing, task])
+
+  // 子任务数量变化时，无子任务自动收起
+  useEffect(() => {
+    if (subtasks.length === 0) setSubOpen(false)
+  }, [subtasks.length])
 
   if (editing) {
     return (
@@ -237,6 +279,7 @@ function TaskCard({
 
   // 展示态
   const done = task.status === 'done'
+  const doneSubCount = subtasks.filter((s) => s.status === 'done').length
   return (
     <Card className={`transition-all duration-200 hover:-translate-y-0.5 hover:shadow-md ${done ? 'opacity-60' : ''}`}>
       <CardContent className="space-y-2 pt-4">
@@ -270,6 +313,9 @@ function TaskCard({
           {task.source === 'from_chat' && (
             <span className="rounded bg-accent/10 px-1.5 py-0.5 text-[10px] text-accent">来自对话</span>
           )}
+          {task.source === 'from_note' && (
+            <span className="rounded bg-accent/10 px-1.5 py-0.5 text-[10px] text-accent">来自笔记</span>
+          )}
           <div className="ml-auto flex items-center gap-1">
             <Button size="sm" variant="ghost" onClick={onEdit}>
               编辑
@@ -279,12 +325,87 @@ function TaskCard({
             </Button>
           </div>
         </div>
+
+        {/* v1.10：子任务区（两级层级）*/}
+        <div className="space-y-1.5 border-t pt-2">
+          <button
+            onClick={() => setSubOpen((v) => !v)}
+            className="flex items-center gap-1 text-[11px] text-muted-foreground transition-colors hover:text-foreground"
+          >
+            {subOpen ? <CaretDown size={11} /> : <CaretRight size={11} />}
+            <span>子任务 {subtasks.length > 0 && `（${doneSubCount}/${subtasks.length}）`}</span>
+          </button>
+          {subOpen && (
+            <div className="space-y-1 pl-3">
+              {/* 子任务列表（缩进 + 左竖线表示层级）*/}
+              <div className="space-y-0.5 border-l border-border pl-3">
+                {subtasks.map((sub) => {
+                  const subDone = sub.status === 'done'
+                  return (
+                    <div key={sub.id} className="group flex items-center gap-2 py-0.5">
+                      <button
+                        onClick={() => onToggleSubtaskDone(sub)}
+                        title={subDone ? '标记为待办' : '标记完成'}
+                        className={`flex h-4 w-4 flex-shrink-0 items-center justify-center rounded border-2 transition-colors ${
+                          subDone
+                            ? 'border-success bg-success text-primary-foreground'
+                            : 'border-muted-foreground/40 hover:border-primary'
+                        }`}
+                      >
+                        {subDone && <Check size={10} />}
+                      </button>
+                      <span className={`flex-1 text-sm ${subDone ? 'line-through opacity-60' : ''}`}>
+                        {sub.title}
+                      </span>
+                      <button
+                        onClick={() => onDeleteSubtask(sub)}
+                        className="text-[10px] text-muted-foreground opacity-0 transition-opacity hover:text-destructive group-hover:opacity-100"
+                      >
+                        删除
+                      </button>
+                    </div>
+                  )
+                })}
+              </div>
+              {/* 添加子任务 */}
+              {addingSub ? (
+                <Input
+                  autoFocus
+                  value={subInput}
+                  onChange={(e) => setSubInput(e.target.value)}
+                  placeholder="子任务标题，回车确认"
+                  className="h-7 text-xs"
+                  onKeyDown={(e) => {
+                    if (e.key === 'Enter' && subInput.trim()) {
+                      onAddSubtask(subInput.trim())
+                      setSubInput('')
+                      setAddingSub(false)
+                    } else if (e.key === 'Escape') {
+                      setSubInput('')
+                      setAddingSub(false)
+                    }
+                  }}
+                  onBlur={() => {
+                    if (!subInput.trim()) setAddingSub(false)
+                  }}
+                />
+              ) : (
+                <button
+                  onClick={() => setAddingSub(true)}
+                  className="flex items-center gap-1 text-[11px] text-muted-foreground transition-colors hover:text-foreground"
+                >
+                  <Plus size={11} /> 添加子任务
+                </button>
+              )}
+            </div>
+          )}
+        </div>
       </CardContent>
     </Card>
   )
 }
 
-// ---------- 添加任务 ----------
+// ---------- 添加任务（恒为根任务，parentId=null） ----------
 function AddTaskCard({ onAdd }: { onAdd: (input: TaskInput) => void }) {
   const [open, setOpen] = useState(false)
   const [title, setTitle] = useState('')

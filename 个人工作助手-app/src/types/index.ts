@@ -141,6 +141,7 @@ export interface Task {
   source: TaskSource
   sourceConversationId: string | null
   sourceNotePath: string | null // v1.9.1 笔记转任务溯源
+  parentId: string | null // v1.10 父任务 id（两级层级，null=根任务）
   followupLog: string | null
   completedAt: number | null // v1.8：完成时间戳，status→done 时写
   createdAt: number
@@ -257,6 +258,13 @@ export interface TaskDraftInput {
 export interface TaskFromNoteInput {
   title: string
   noteId: string
+  priority?: TaskPriority
+  dueDate?: number | null
+}
+
+export interface TaskSubtaskInput {
+  parentId: string
+  title: string
   priority?: TaskPriority
   dueDate?: number | null
 }

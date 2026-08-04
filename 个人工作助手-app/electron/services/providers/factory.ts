@@ -121,6 +121,7 @@ function rowToTask(r: typeof tasks.$inferSelect): Task {
     source: r.source,
     sourceConversationId: r.sourceConversationId,
     sourceNotePath: r.sourceNotePath,
+    parentId: r.parentId,
     followupLog: r.followupLog,
     completedAt: r.completedAt,
     createdAt: r.createdAt,
