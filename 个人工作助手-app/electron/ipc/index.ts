@@ -23,6 +23,7 @@ import {
   listTasks,
   listFollowupCandidates,
   listReminders,
+  parseTags,
 } from '../services/providers/factory'
 import {
   listConversations,
@@ -49,6 +50,7 @@ import { resolveProviderId } from '../services/providers/router'
 import { extractTasks } from '../services/taskExtractor'
 import { generateReport } from '../services/reportGenerator'
 import { assistNote } from '../services/noteAssistant'
+import { generateMindmap } from '../services/mindmapGenerator'
 import { assembleTools, type ToolContext } from '../services/tools'
 import { getSystemDirs, type AccessibleDir } from '../services/systemDirs'
 import { PROVIDER_PRESETS } from '../services/providers/types'
@@ -96,6 +98,8 @@ import type {
   ReportPreviewResult,
   NoteAiParams,
   NoteAiResult,
+  MindmapGenerateParams,
+  MindmapResult,
 } from '../types'
 
 /**
@@ -671,6 +675,7 @@ function rowToTask(row: typeof tasks.$inferSelect): Task {
     parentId: row.parentId,
     followupLog: row.followupLog,
     completedAt: row.completedAt,
+    tags: parseTags(row.tags),
     createdAt: row.createdAt,
     updatedAt: row.updatedAt,
   }
@@ -713,6 +718,8 @@ function registerTaskHandlers() {
             status: input.status ?? existing.status,
             priority: input.priority ?? existing.priority,
             dueDate: input.dueDate !== undefined ? input.dueDate : existing.dueDate,
+            // v1.11：tags 未传用 existing 兜底（JSON 字符串存库）
+            tags: input.tags !== undefined ? JSON.stringify(input.tags) : existing.tags,
             completedAt,
             updatedAt: now,
           })
@@ -728,6 +735,7 @@ function registerTaskHandlers() {
             status: input.status ?? 'todo',
             priority: input.priority ?? 'medium',
             dueDate: input.dueDate ?? null,
+            tags: JSON.stringify(input.tags ?? []),
             source: 'manual',
           })
           .run()
@@ -1398,6 +1406,65 @@ function registerReportHandlers() {
   })
 }
 
+// ---------- v1.12：AI 思维导图 handlers（照搬 report 可取消范式） ----------
+function registerMindmapHandlers() {
+  const mindmapAbortMap = new Map<string, AbortController>()
+
+  ipcMain.handle(
+    'mindmap:generate',
+    async (_, params: MindmapGenerateParams): Promise<IpcResult<MindmapResult>> => {
+      try {
+        // 1. 读报告模型配置（复用 report.providerId，零新配置）
+        const providerRow = getDb()
+          .select()
+          .from(settings)
+          .where(eq(settings.key, 'report.providerId'))
+          .get()
+        const providerId = providerRow?.value ?? null
+        if (!providerId) {
+          return err('未配置模型，请在设置页「报告模型」区选择一个模型')
+        }
+
+        // 2. 输入校验：topic 或 material 至少一个非空
+        const topic = params.topic?.trim()
+        const material = params.material?.trim()
+        if (!topic && !material) {
+          return err('请输入主题，或选择一个笔记/任务作为素材')
+        }
+
+        // 3. 注册可取消控制器
+        const reqId = params.reqId ?? ''
+        const ac = new AbortController()
+        if (reqId) mindmapAbortMap.set(reqId, ac)
+
+        try {
+          // 4. 调模型生成 Markdown 层级标题
+          const markdown = await generateMindmap(providerId, { topic, material }, { signal: ac.signal })
+
+          // 5. 写入笔记库（tag='思维导图'，标题取主题或素材来源）
+          const title = `思维导图：${topic || params.sourceTitle || '未命名'}`
+          const note = createNote({ title, content: markdown, tags: ['思维导图'] })
+
+          return ok({ note, markdown })
+        } finally {
+          if (reqId) mindmapAbortMap.delete(reqId)
+        }
+      } catch (e) {
+        return err(String(e))
+      }
+    },
+  )
+
+  ipcMain.handle('mindmap:cancel', (_, reqId: string): IpcResult<true> => {
+    const ac = mindmapAbortMap.get(reqId)
+    if (ac) {
+      ac.abort()
+      mindmapAbortMap.delete(reqId)
+    }
+    return ok(true)
+  })
+}
+
 /**
  * 聚合报告数据（v1.8.1 抽出，preview 与 generate 共用）。
  * 按时间范围过滤 tasks(按 completedAt) + messages(按 createdAt) + pomodoros(按 startedAt) + reminders(按 time)。
@@ -1671,6 +1738,7 @@ export function registerIpcHandlers() {
   registerDbHandlers()
   registerDashboardHandlers()
   registerReportHandlers()
+  registerMindmapHandlers()
   registerMetaHandlers()
   logInfo('[ipc] handlers registered')
 }

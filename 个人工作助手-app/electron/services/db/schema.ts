@@ -104,6 +104,9 @@ export const tasks = sqliteTable('tasks', {
   // v1.8：完成时间戳（精确「今日完成」用于日报）。status→done 时写，切回非 done 清空。
   // 老库迁移见 db/index.ts 的幂等 ALTER（项目无 migrate 框架）。
   completedAt: integer('completed_at', { mode: 'number' }), // Unix 秒，可空
+  // v1.11：任务标签（JSON 字符串，如 '["工作","紧急"]'）。parseTags 容错解析。
+  // 存 JSON 而非关联表：零新表，照搬 completedAt/parentId 的列加法。
+  tags: text('tags').notNull().default('[]'),
   createdAt: integer('created_at', { mode: 'number' })
     .notNull()
     .default(sql`(unixepoch())`),

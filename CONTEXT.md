@@ -80,6 +80,12 @@ Task 字段，追加式文本，记录每次 AI 跟进时用户的回复摘要�
 - **筛选与维度正交**：筛选条（状态）+ 分组（维度）组合生效，如「待办+按截止日」。
 - **纯 UI、零新表/IPC/字段**：前端 useMemo + reduce，复用现有 tasks store。偏好本次不持久化（每次进页面默认按截止日）。
 - **逻辑完成（Logical Done，v1.10.8）**：分组/计数用的「完成」判定。根任务有子任务时，自身 `status==='done'` **且** 所有子任务 `status==='done'` 才算逻辑完成（`isLogicallyDone`）；无子任务只看自身。区别于原始 `status` 字段——状态分布饼图等「展示真实状态」场景仍用原始 status，只有「这个任务算不算完成」的计数/分组判定用逻辑完成。落地：`src/lib/taskStatus.ts`。
+- **Task Tag（任务标签，v1.11）**：跨状态/优先级的横向分类维度。`tags: string[]`，存 tasks 表 `tags` 列（JSON 字符串，如 `'["工作","紧急"]'`），`parseTags` 容错解析。
+  - **存 JSON 而非关联表**：零新表、零 JOIN，照搬 completedAt/parentId 的列加法。与「状态/优先级」正交——一个任务可同时是「进行中」状态 +「工作」标签。
+  - **标签字典（tagDict）**：最近用过的标签集合，存 settings KV `tasks.tagDict`（零新表），编辑时作为候选项。字典随任务生灭，不做标签管理页。
+  - **与 Note tags 的区别**：Note 的 tags 存 .md frontmatter（不入库），Task Tag 存 SQL 列。两者独立不互通。
+  - **统一 accent 蓝**：标签徽标用 `bg-accent/10 text-accent`（不做颜色自定义，避免色彩泛滥）。
+  - **不要叫**："分类/分组"——分类是 Project（未做，②），标签是自由文本横向归类；"目录"——那是文件夹。
 - **不要叫**："排序/分类"——智能分组特指按维度分区块渲染；"看板"——那是 Dashboard 历史趋势页。
 
 ---
@@ -224,6 +230,15 @@ AI 聚合「完成任务 + 对话 + 番茄钟 + 提醒」生成的 Markdown 工�
 - **入口**：工具页 ReportToolbox（照搬 PdfToolbox 骨架，daily/weekly/custom 模式切换 + 历史报告列表）。
 - **不要叫**："总结/汇报/summary"——Report 特指 AI 生成的日报/周报笔记。
 
+### **Mindmap（AI 思维导图，v1.12，PRD §15.3 AI 产出组）**
+AI 把主题或素材展开成多层级的 Markdown 标题，markmap 渲染成可交互 SVG 思维导图。
+- **两种输入模式**：topic 主题（AI 自由展开）/ material 素材（选笔记或根任务，AI 提炼结构）。
+- **渲染**：markmap-lib 的 `Transformer.transform(md)` 解析 Markdown 标题层级 → markmap-view 的 `Markmap.create(svg)` 渲染 SVG（拖拽缩放 + 点击节点折叠/展开）。
+- **存储**：写成 .md 笔记存入笔记库，tag=`['思维导图']`，不建专表（数据复用优先，同 Report）。
+- **生成**：非流式（照搬 reportGenerator 范式），`mindmapGenerator.ts` + `mindmap:generate` IPC。复用 `report.providerId`（零新配置）。
+- **可取消**：reqId + 模块级 mindmapAbortMap + mindmap:cancel IPC（照搬 report:generate）。
+- **不要叫**："脑图/大纲/树状图"——Mindmap 特指 AI 生成 + markmap 渲染的思维导图笔记。
+
 ### **NoteAiAssist（AI 笔记助手，v1.9 M18，PRD §15.2①）**
 笔记页对当前笔记执行的 4 个 AI 操作，结果以「可插入块」呈现。
 - **4 个操作（NoteAiOp）**：summary 摘要（提炼核心要点）/ todos 提炼待办（抽 `- [ ]` 任务项）/ questions 提问（基于笔记提启发问题，可选追问）/ continue 续写（顺延内容续写一段）。
@@ -347,6 +362,8 @@ PRD §7 验收优先级。P0 必做 = v1 完成；P1 可选。
 | 首页 / 统计页 / 报表 | **Dashboard**（v1.4 数据看板，历史趋势分析，区别于概览页今日快照） |
 | 路由 / 自动切换 / 分类器 | **ModelTier**（v1.6 模型档位，手动语义分组，不做自动判定） |
 | 总结 / 汇报 / summary | **Report**（v1.8 AI 日报/周报，特指 AI 生成的报告笔记） |
+| 脑图 / 大纲 / 树状图 | **Mindmap**（v1.12 AI 思维导图，AI 生成 + markmap 渲染） |
 | 笔记 AI / 智能笔记 | **NoteAiAssist**（v1.9 笔记页 4 个 AI 操作，区别于 create_note FC 工具） |
 | finishTime / doneAt | **completedAt**（v1.8 任务完成时间戳，与 status='done' 语义对齐） |
 | 排序 / 分类 / 看板 | **智能分组展示（Smart Grouping）**（v1.10.8 任务页按维度自动分区块） |
+| 分类 / 目录 | **Task Tag（任务标签）**（v1.11 跨状态横向归类，自由文本）；「项目分类」是未做的 Project（②） |

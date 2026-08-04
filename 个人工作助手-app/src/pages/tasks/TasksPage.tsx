@@ -9,6 +9,7 @@ import { Card, CardContent } from '@/components/ui/card'
 import { EmptyState } from '@/components/ui/EmptyState'
 import { useTasksStore } from '@/stores/tasks'
 import { isLogicallyDone } from '@/lib/taskStatus'
+import { invoke } from '@/lib/ipc'
 import type { Task, TaskInput, TaskPriority, TaskStatus } from '@/types'
 
 // ---------- 状态/优先级 显示映射 ----------
@@ -127,10 +128,48 @@ export function TasksPage() {
   // v1.10.8：分组维度，默认按截止日
   const [groupBy, setGroupBy] = useState<GroupBy>('due')
   const [editingId, setEditingId] = useState<string | null>(null)
+  // v1.11：标签筛选（'all'=全部，null=未标注，其他=指定标签）
+  const [tagFilter, setTagFilter] = useState<string | 'all' | null>('all')
+  // v1.11：标签字典（最近用过的标签，settings KV tasks.tagDict，最多 50 个）
+  const [tagDict, setTagDict] = useState<string[]>(EMPTY_TAGS)
 
   useEffect(() => {
     refresh()
+    // 加载标签字典
+    invoke<string | null>('settings:get', 'tasks.tagDict').then((raw) => {
+      if (raw) {
+        try {
+          const parsed = JSON.parse(raw)
+          if (Array.isArray(parsed)) setTagDict(parsed.filter((t) => typeof t === 'string'))
+        } catch {
+          /* 容错：坏数据忽略 */
+        }
+      }
+    })
   }, [refresh])
+
+  // 所有任务用过的标签去重列表（前端 reduce，零新 IPC）+ 合并字典，给筛选条用
+  const allTags = useMemo(() => {
+    const set = new Set<string>()
+    for (const t of tasks) for (const tag of t.tags) set.add(tag)
+    for (const tag of tagDict) set.add(tag)
+    return Array.from(set).sort()
+  }, [tasks, tagDict])
+
+  // v1.11：保存任务时把新标签追加到字典（去重 + 截断 50 个）
+  const upsertWithTags = async (input: TaskInput) => {
+    await upsert(input)
+    // 收集本次用到的新标签，追加字典
+    if (input.tags && input.tags.length > 0) {
+      const newTags = input.tags.filter((t) => !tagDict.includes(t))
+      if (newTags.length > 0) {
+        const next = [...input.tags.filter((t) => !tagDict.includes(t)), ...tagDict]
+        const trimmed = Array.from(new Set(next)).slice(0, 50)
+        setTagDict(trimmed)
+        await invoke<true>('settings:set', 'tasks.tagDict', JSON.stringify(trimmed))
+      }
+    }
+  }
 
   // v1.10.1 A1：删根任务，有子任务时 confirm 级联删
   const handleDeleteRoot = (task: Task, subCount: number) => {
@@ -185,11 +224,16 @@ export function TasksPage() {
   }, [rootTasks, subtasksByParent])
 
   const filtered = useMemo(() => {
-    if (filter === 'all') return rootTasks
-    if (filter === 'done') return rootTasks.filter((t) => logicallyDoneIds.has(t.id))
-    // todo / in_progress：按原始 status，但要排除「逻辑完成」的（根任务 status=done 但逻辑未完成时不应进 todo/in_progress）
-    return rootTasks.filter((t) => t.status === filter && !logicallyDoneIds.has(t.id))
-  }, [rootTasks, filter, logicallyDoneIds])
+    // v1.11：先按状态过滤
+    let byStatus: Task[]
+    if (filter === 'all') byStatus = rootTasks
+    else if (filter === 'done') byStatus = rootTasks.filter((t) => logicallyDoneIds.has(t.id))
+    else byStatus = rootTasks.filter((t) => t.status === filter && !logicallyDoneIds.has(t.id))
+    // v1.11：再叠加标签过滤（与状态筛选正交）
+    if (tagFilter === 'all') return byStatus
+    if (tagFilter === null) return byStatus.filter((t) => t.tags.length === 0)
+    return byStatus.filter((t) => t.tags.includes(tagFilter))
+  }, [rootTasks, filter, logicallyDoneIds, tagFilter])
 
   // v1.10.8：分组计算（先 partition done/undone，再对 undone 按维度分组）
   // 筛选「已完成」时不分组（用户已显式要看完成的，平铺即可）
@@ -239,6 +283,28 @@ export function TasksPage() {
           <FilterBtn active={filter === 'in_progress'} onClick={() => setFilter('in_progress')} label={`进行中 ${counts.in_progress}`} />
           <FilterBtn active={filter === 'done'} onClick={() => setFilter('done')} label={`已完成 ${counts.done}`} />
           <div className="ml-auto flex items-center gap-1.5">
+            {/* v1.11：标签筛选（有标签时才显示），与状态筛选正交 */}
+            {allTags.length > 0 && (
+              <>
+                <span className="text-[11px] text-muted-foreground">标签</span>
+                <select
+                  value={tagFilter === null ? '__none__' : tagFilter}
+                  onChange={(e) => {
+                    const v = e.target.value
+                    setTagFilter(v === 'all' ? 'all' : v === '__none__' ? null : v)
+                  }}
+                  className="h-7 rounded-md border border-input bg-background px-2 text-xs"
+                >
+                  <option value="all">全部标签</option>
+                  <option value="__none__">未标注</option>
+                  {allTags.map((tag) => (
+                    <option key={tag} value={tag}>
+                      {tag}
+                    </option>
+                  ))}
+                </select>
+              </>
+            )}
             <span className="text-[11px] text-muted-foreground">分组</span>
             <select
               value={groupBy}
@@ -307,10 +373,11 @@ export function TasksPage() {
         task={t}
         subtasks={subtasksByParent.get(t.id) ?? EMPTY_TASKS}
         allRootTasks={rootTasks}
+        tagDict={tagDict}
         editing={editingId === t.id}
         onEdit={() => setEditingId(editingId === t.id ? null : t.id)}
         onSave={(input) => {
-          upsert(input)
+          upsertWithTags(input)
           setEditingId(null)
         }}
         onToggleDone={() =>
@@ -332,6 +399,7 @@ export function TasksPage() {
 
 // 模块级空数组保证引用稳定（避免 zustand selector 返回内联数组陷阱）
 const EMPTY_TASKS: Task[] = []
+const EMPTY_TAGS: string[] = []
 
 // ---------- 筛选按钮 ----------
 function FilterBtn({ active, onClick, label }: { active: boolean; onClick: () => void; label: string }) {
@@ -445,11 +513,88 @@ function PriorityBadge({ priority }: { priority: TaskPriority }) {
   )
 }
 
+// v1.11：标签编辑器（编辑态用）。候选 = 字典 ∪ 当前标签，点选切换 + 输入新标签回车追加。
+function TagEditor({
+  tags,
+  setTags,
+  tagDict,
+}: {
+  tags: string[]
+  setTags: (next: string[]) => void
+  tagDict: string[]
+}) {
+  const [input, setInput] = useState('')
+  // 候选标签 = 字典 ∪ 当前标签（去重），最多展示 20 个避免太长
+  const candidates = useMemo(() => {
+    const set = new Set<string>([...tagDict, ...tags])
+    return Array.from(set).slice(0, 20)
+  }, [tagDict, tags])
+
+  const toggle = (tag: string) => {
+    setTags(tags.includes(tag) ? tags.filter((t) => t !== tag) : [...tags, tag])
+  }
+  const addNew = () => {
+    const t = input.trim()
+    if (t && !tags.includes(t)) setTags([...tags, t])
+    setInput('')
+  }
+
+  return (
+    <div className="space-y-1.5">
+      <Label>标签（可选）</Label>
+      {/* 已选标签徽标（可点删除）*/}
+      {tags.length > 0 && (
+        <div className="flex flex-wrap gap-1">
+          {tags.map((tag) => (
+            <button
+              key={tag}
+              onClick={() => toggle(tag)}
+              className="rounded bg-accent/10 px-1.5 py-0.5 text-[10px] font-medium text-accent transition-colors hover:bg-accent/20"
+            >
+              {tag} ✕
+            </button>
+          ))}
+        </div>
+      )}
+      {/* 候选标签（点选切换）*/}
+      {candidates.length > 0 && (
+        <div className="flex flex-wrap gap-1">
+          {candidates
+            .filter((c) => !tags.includes(c))
+            .map((tag) => (
+              <button
+                key={tag}
+                onClick={() => toggle(tag)}
+                className="rounded bg-surface-3 px-1.5 py-0.5 text-[10px] text-muted-foreground transition-colors hover:bg-accent/10 hover:text-accent"
+              >
+                + {tag}
+              </button>
+            ))}
+        </div>
+      )}
+      {/* 输入新标签 */}
+      <Input
+        value={input}
+        onChange={(e) => setInput(e.target.value)}
+        placeholder="输入新标签，回车添加"
+        className="h-8 text-xs"
+        onKeyDown={(e) => {
+          if (e.key === 'Enter' && input.trim()) {
+            e.preventDefault()
+            addNew()
+          }
+        }}
+      />
+    </div>
+  )
+}
+
 // ---------- 单个任务卡片（根任务，v1.10 含子任务区） ----------
 function TaskCard({
   task,
   subtasks,
   allRootTasks,
+  tagDict,
   editing,
   onEdit,
   onSave,
@@ -465,6 +610,7 @@ function TaskCard({
   task: Task
   subtasks: Task[]
   allRootTasks: Task[]
+  tagDict: string[]
   editing: boolean
   onEdit: () => void
   onSave: (input: TaskInput) => void
@@ -483,6 +629,8 @@ function TaskCard({
   const [status, setStatus] = useState<TaskStatus>(task.status)
   const [priority, setPriority] = useState<TaskPriority>(task.priority)
   const [dueDate, setDueDate] = useState(task.dueDate ? toDateInput(task.dueDate) : '')
+  // v1.11：标签（编辑态本地副本，保存时随其他字段一起 upsert）
+  const [tags, setTags] = useState<string[]>(task.tags)
   // v1.10：子任务区折叠态（默认展开若有子任务）
   const [subOpen, setSubOpen] = useState(subtasks.length > 0)
   const [subInput, setSubInput] = useState('')
@@ -499,6 +647,7 @@ function TaskCard({
       setStatus(task.status)
       setPriority(task.priority)
       setDueDate(task.dueDate ? toDateInput(task.dueDate) : '')
+      setTags(task.tags)
     }
   }, [editing, task])
 
@@ -554,6 +703,8 @@ function TaskCard({
               选一个根任务作为父任务，本任务变为其子任务；选「独立」变回根任务
             </p>
           </div>
+          {/* v1.11：标签编辑（候选来自字典 + 当前标签 + 输入新标签）*/}
+          <TagEditor tags={tags} setTags={setTags} tagDict={tagDict} />
           <div className="flex items-center gap-2 pt-1">
             <Button
               size="sm"
@@ -566,6 +717,7 @@ function TaskCard({
                   status,
                   priority,
                   dueDate: dueDate ? fromDateInput(dueDate) : null,
+                  tags,
                 })
               }
             >
@@ -609,6 +761,12 @@ function TaskCard({
         <div className="flex flex-wrap items-center gap-1.5">
           <StatusBadge status={task.status} />
           <PriorityBadge priority={task.priority} />
+          {/* v1.11：标签徽标（统一 accent 蓝，避免色彩泛滥）*/}
+          {task.tags.map((tag) => (
+            <span key={tag} className="rounded bg-accent/10 px-1.5 py-0.5 text-[10px] font-medium text-accent">
+              {tag}
+            </span>
+          ))}
           {task.dueDate && (
             <span className="rounded bg-muted px-1.5 py-0.5 text-[10px] text-muted-foreground">
               截止 {formatDueDate(task.dueDate)}

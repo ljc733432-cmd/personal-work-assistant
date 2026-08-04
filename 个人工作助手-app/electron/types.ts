@@ -118,6 +118,7 @@ export interface Task {
   parentId: string | null // v1.10 父任务 id（两级层级，null=根任务）
   followupLog: string | null // M6 跟进日志
   completedAt: number | null // v1.8：完成时间戳，status→done 时写，null=未完成
+  tags: string[] // v1.11：任务标签（JSON 字符串存库，rowToTask 解析）
   createdAt: number
   updatedAt: number
 }
@@ -129,6 +130,7 @@ export interface TaskInput {
   status?: TaskStatus
   priority?: TaskPriority
   dueDate?: number | null
+  tags?: string[] // v1.11：标签，未传时 upsert 更新分支用 existing 兜底
   // source/sourceConversationId/followupLog 由服务端控制，不入 TaskInput
   // （M3 手动建默认 source=manual；M4 抽取入库走单独路径填 from_chat）
   enabled?: boolean // 未用，保留以与 WorkDirInput 风格一致（可忽略）
@@ -409,6 +411,26 @@ export interface ReportPreviewResult {
   reminderCount: number
   rangeLabel: string // 如「今日」「本周」「2026-08-01 ~ 2026-08-04」
   empty: boolean // 全空（generate 会拦截，preview 提前告知）
+}
+
+// ---------- Mindmap：AI 思维导图（v1.12，PRD §15.3 AI 产出组） ----------
+// 复用 report.providerId（零新配置）。非流式，照搬 reportGenerator 范式。
+// 两种输入：topic 主题 / material 素材（笔记或任务内容）。输出 Markdown 层级标题，markmap 渲染。
+export interface MindmapGenerateParams {
+  /** 主题模式：用户自由输入的主题字符串 */
+  topic?: string
+  /** 素材模式：笔记/任务内容，AI 基于此生成 */
+  material?: string
+  /** 素材来源标题（笔记标题或任务标题），用于命名生成的笔记 */
+  sourceTitle?: string
+  reqId?: string
+}
+
+/** mindmap:generate 返回。note 为写入笔记库的思维导图笔记（tag='思维导图'）。 */
+export interface MindmapResult {
+  note: Note
+  /** 生成的 Markdown（与 note.content 同），UI 直接用于 markmap 渲染 */
+  markdown: string
 }
 
 // ---------- NoteAiAssist：AI 笔记助手（v1.9 M18，PRD §15.2①） ----------
