@@ -480,37 +480,38 @@ function TaskCard({
                   )
                 })}
               </div>
-              {/* 添加子任务 */}
-              {addingSub ? (
-                <Input
-                  autoFocus
-                  value={subInput}
-                  onChange={(e) => setSubInput(e.target.value)}
-                  placeholder="子任务标题，回车确认"
-                  className="h-7 text-xs"
-                  onKeyDown={(e) => {
-                    if (e.key === 'Enter' && subInput.trim()) {
-                      onAddSubtask(subInput.trim())
-                      setSubInput('')
-                      setAddingSub(false)
-                    } else if (e.key === 'Escape') {
-                      setSubInput('')
-                      setAddingSub(false)
-                    }
-                  }}
-                  onBlur={() => {
-                    if (!subInput.trim()) setAddingSub(false)
-                  }}
-                />
-              ) : (
-                <button
-                  onClick={() => setAddingSub(true)}
-                  className="flex items-center gap-1 text-[11px] text-muted-foreground transition-colors hover:text-foreground"
-                >
-                  <Plus size={11} /> 添加子任务
-                </button>
-              )}
             </div>
+          )}
+          {/* 添加子任务（v1.10.6：移出折叠区，始终可见——否则首次无子任务时折叠导致看不见入口）*/}
+          {addingSub ? (
+            <Input
+              autoFocus
+              value={subInput}
+              onChange={(e) => setSubInput(e.target.value)}
+              placeholder="子任务标题，回车确认"
+              className="h-7 text-xs"
+              onKeyDown={(e) => {
+                if (e.key === 'Enter' && subInput.trim()) {
+                  onAddSubtask(subInput.trim())
+                  setSubInput('')
+                  setAddingSub(false)
+                  setSubOpen(true) // 添加后展开，让用户看到新加的子任务
+                } else if (e.key === 'Escape') {
+                  setSubInput('')
+                  setAddingSub(false)
+                }
+              }}
+              onBlur={() => {
+                if (!subInput.trim()) setAddingSub(false)
+              }}
+            />
+          ) : (
+            <button
+              onClick={() => setAddingSub(true)}
+              className="flex items-center gap-1 text-[11px] text-muted-foreground transition-colors hover:text-foreground"
+            >
+              <Plus size={11} /> 添加子任务
+            </button>
           )}
         </div>
       </CardContent>
