@@ -335,7 +335,7 @@ export interface PdfSplitResult {
 
 /** 报告数据载荷（喂给模型的聚合数据，已在 IPC 层按时间范围过滤 + 截断）。 */
 export interface ReportPayload {
-  range: 'daily' | 'weekly'
+  range: ReportRange
   fromSec: number
   toSec: number
   /** 时间范围内完成的任务（done + completedAt 落在区间） */
@@ -348,14 +348,39 @@ export interface ReportPayload {
   reminders: { time: number; content: string; done: boolean }[]
 }
 
-/** report:generate 入参。不传 fromSec/toSec 时服务端按 range 算默认区间（今日/本周）。 */
+/** 报告范围模式。custom = 用户自选日期区间（v1.8.1 打磨）。 */
+export type ReportRange = 'daily' | 'weekly' | 'custom'
+
+/** report:generate 入参。
+ *  - 不传 fromSec/toSec 时按 range 算默认（daily=今日，weekly=本周一到今天）。
+ *  - custom 模式必须传 fromSec/toSec。
+ *  - reqId 用于可取消（v1.8.1 打磨）：传 report:cancel 时按此 id 中断。 */
 export interface ReportGenerateParams {
-  range: 'daily' | 'weekly'
+  range: ReportRange
   fromSec?: number
   toSec?: number
+  reqId?: string
 }
 
 /** report:generate 返回。note 为写入笔记库的报告笔记。 */
 export interface ReportResult {
   note: Note
+}
+
+/** report:preview 入参（v1.8.1 打磨：生成前预览数据计数，不调模型）。与 generate 同构。 */
+export interface ReportPreviewParams {
+  range: ReportRange
+  fromSec?: number
+  toSec?: number
+}
+
+/** report:preview 返回：各类数据计数 + 区间标签，用于 UI「将基于以下数据」实时展示。 */
+export interface ReportPreviewResult {
+  taskCount: number
+  messageCount: number
+  pomoCount: number
+  pomoMinutes: number
+  reminderCount: number
+  rangeLabel: string // 如「今日」「本周」「2026-08-01 ~ 2026-08-04」
+  empty: boolean // 全空（generate 会拦截，preview 提前告知）
 }

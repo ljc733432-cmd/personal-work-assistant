@@ -33,16 +33,20 @@ const SYSTEM_PROMPT = `你是一个工作总结助手。根据用户提供的当
  *
  * @param providerId 报告用的 Provider（设置页配的「报告模型」）
  * @param payload 聚合后的数据载荷（时间范围内已过滤 + 截断）
- * @returns Markdown 字符串（不会抛错，空内容返回兜底）
+ * @param options.signal 可选 AbortSignal（v1.8.1 打磨：report:cancel 用，中断模型请求）
+ * @returns Markdown 字符串（不会抛错，空内容返回兜底；被 cancel 时抛 AbortError 由调用方处理）
  */
 export async function generateReport(
   providerId: string,
   payload: ReportPayload,
+  options: { signal?: AbortSignal } = {},
 ): Promise<string> {
   const { client, model } = createClientForProvider(providerId)
 
   const userContent = buildUserPrompt(payload)
 
+  // signal 与 timeout 同走 SDK 的 requestOptions（第二个参数）。
+  // 被 abort 时 SDK 抛 APIUserAbortError，调用方 catch 后返回 err（UI 显示已取消）。
   const res = await client.chat.completions.create(
     {
       model,
@@ -54,7 +58,7 @@ export async function generateReport(
       temperature: 0.3, // 报告要通顺但不要胡编，0.3 比抽取的 0 略高
       max_tokens: 4000, // 报告比草稿长，给足空间但防 timeout
     },
-    { timeout: 30000 }, // 30s 超时（ms，SDK request options）
+    { timeout: 30000, signal: options.signal }, // 30s 超时 + 可取消
   )
 
   const content = res.choices?.[0]?.message?.content ?? ''
@@ -72,7 +76,13 @@ export async function generateReport(
 
 /** 把 payload 拼成喂给模型的 user 消息（紧凑格式，省 token）。 */
 function buildUserPrompt(payload: ReportPayload): string {
-  const rangeLabel = payload.range === 'daily' ? '今日' : '本周'
+  // custom 模式显式带日期区间，daily/weekly 用语义词
+  const rangeLabel =
+    payload.range === 'daily'
+      ? '今日'
+      : payload.range === 'weekly'
+        ? '本周'
+        : `${fmt(payload.fromSec)}~${fmt(payload.toSec)}`
   const lines: string[] = []
   lines.push(`以下是${rangeLabel}的工作数据，请生成报告。`)
   lines.push('')
@@ -120,4 +130,13 @@ function buildUserPrompt(payload: ReportPayload): string {
   }
 
   return lines.join('\n')
+}
+
+/** Unix 秒 → YYYY-MM-DD（本地时区），给 custom 区间用。 */
+function fmt(sec: number): string {
+  const d = new Date(sec * 1000)
+  const y = d.getFullYear()
+  const m = String(d.getMonth() + 1).padStart(2, '0')
+  const day = String(d.getDate()).padStart(2, '0')
+  return `${y}-${m}-${day}`
 }
