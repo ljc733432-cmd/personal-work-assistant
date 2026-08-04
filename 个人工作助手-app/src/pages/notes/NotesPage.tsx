@@ -266,16 +266,16 @@ export function NotesPage() {
             )}
 
             {/* 正文 */}
-            <div className="flex-1 overflow-y-auto px-6 py-4">
+            <div className="flex-1 overflow-hidden px-6 py-4">
               {editing ? (
                 <Textarea
                   value={draftContent}
                   onChange={(e) => setDraftContent(e.target.value)}
                   placeholder="输入 Markdown 正文…（Shift+Enter 换行）"
-                  className="min-h-full resize-none border-transparent bg-transparent font-mono text-sm focus-visible:ring-0"
+                  className="h-full min-h-0 flex-1 resize-none border-transparent bg-transparent font-mono text-sm focus-visible:ring-0"
                 />
               ) : (
-                <div className="mx-auto max-w-3xl">
+                <div className="mx-auto h-full max-w-3xl overflow-y-auto">
                   {/* v1.9.1 笔记待办转任务面板（PRD §15.2②）：解析 - [ ] 未勾选项，提供转任务按钮 */}
                   <NoteTodosPanel
                     content={active.content}
@@ -346,9 +346,22 @@ function NoteAiPanel({
     setStatus({ kind: 'working', reqId })
     setResult('')
     try {
+      // v1.10.4：todos 操作时，剔除笔记里已有的任务行（含缩进子任务），
+      // 只发纯正文给 AI。避免反复提炼老待办（即使已转任务/已勾选也不再重复提炼）。
+      const sendContent =
+        op === 'todos'
+          ? content
+              .split('\n')
+              .filter((line) => !TASK_LINE_RE.test(line))
+              .join('\n')
+          : content
+      if (op === 'todos' && !sendContent.trim()) {
+        setStatus({ kind: 'error', message: '笔记里除待办外没有其他正文可提炼' })
+        return
+      }
       const r = await invoke<NoteAiResult>('note:ai', {
         op,
-        content,
+        content: sendContent,
         question: op === 'questions' ? question : undefined,
         reqId,
       })
