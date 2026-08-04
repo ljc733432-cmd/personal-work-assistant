@@ -88,6 +88,8 @@ import type {
   ReportPayload,
   ReportGenerateParams,
   ReportResult,
+  ReportPreviewParams,
+  ReportPreviewResult,
 } from '../types'
 
 /**
@@ -1124,6 +1126,39 @@ function registerDashboardHandlers() {
 //   + pomodoros(按 startedAt) + reminders(按 time)。全量拉后内存过滤（数据量小，与 dashboard 同策略）。
 // 报告写成 .md 笔记存入笔记库（ADR-025 复用不建表），路径安全在 noteStore 内部闭环。
 function registerReportHandlers() {
+  // 可取消的生成请求登记表（reqId → AbortController，v1.8.1 打磨）
+  // 模块级 Map，进程内单例。generate 生成前注册，cancel 时 abort，结束（成功/失败）清理。
+  const reportAbortMap = new Map<string, AbortController>()
+
+  // ---------- report:preview（v1.8.1 打磨：生成前预览数据计数，不调模型）----------
+  // UI 切换范围/日期时调，实时显示「X 任务 / Y 对话 / Z 分钟」让用户确认范围合理（PRD §15.8）。
+  ipcMain.handle(
+    'report:preview',
+    (_, params: ReportPreviewParams): IpcResult<ReportPreviewResult> => {
+      try {
+        const { fromSec, toSec } = computeRange(params)
+        const data = aggregateReportData(fromSec, toSec)
+        const preview: ReportPreviewResult = {
+          taskCount: data.tasks.length,
+          messageCount: data.conversations.length,
+          pomoCount: data.pomodoros.length,
+          pomoMinutes: data.pomodoros.reduce((s, p) => s + p.durationMin, 0),
+          reminderCount: data.reminders.length,
+          rangeLabel: buildRangeLabel(params, fromSec, toSec),
+          empty:
+            data.tasks.length === 0 &&
+            data.conversations.length === 0 &&
+            data.pomodoros.length === 0 &&
+            data.reminders.length === 0,
+        }
+        return ok(preview)
+      } catch (e) {
+        return err(String(e))
+      }
+    },
+  )
+
+  // ---------- report:generate（生成报告，支持取消）----------
   ipcMain.handle(
     'report:generate',
     async (_, params: ReportGenerateParams): Promise<IpcResult<ReportResult>> => {
@@ -1139,129 +1174,164 @@ function registerReportHandlers() {
           return err('未配置报告模型，请在设置页「报告模型」区选择一个模型')
         }
 
-        // 2. 算时间范围（不传则默认：daily=今日 0:00~23:59:59；weekly=本周一 0:00~今天 23:59:59）
+        // 2. 算时间范围（custom 必须传 fromSec/toSec，否则当 daily 兜底）
         const { fromSec, toSec } = computeRange(params)
 
-        // 3. 聚合数据
-        const db = getDb()
-
-        // 任务：done + completedAt 落在区间（completedAt 为 null 的历史 done 任务忽略，无法判定何时完成）
-        const allTasks = listTasks()
-        const reportTasks = allTasks
-          .filter(
-            (t) =>
-              t.status === 'done' &&
-              t.completedAt !== null &&
-              t.completedAt >= fromSec &&
-              t.completedAt <= toSec,
-          )
-          .map((t) => ({
-            title: t.title,
-            priority: t.priority,
-            completedAt: t.completedAt,
-          }))
-
-        // 对话：按时间范围取（跨所有会话），role 只取 user/assistant（system/tool 噪音），
-        //   content 截前 200 字，总数限 50 条防超长（reportGenerator prompt 已说明截断）
-        const rawMsgs = listMessagesInRange(fromSec, toSec)
-        const reportMsgs = rawMsgs
-          .filter((m) => m.role === 'user' || m.role === 'assistant')
-          .slice(0, 50)
-          .map((m) => ({
-            role: m.role as 'user' | 'assistant',
-            content: m.content.length > 200 ? m.content.slice(0, 200) + '…' : m.content,
-            createdAt: m.createdAt,
-          }))
-
-        // 番茄钟：startedAt 落在区间
-        const pomoRows = db
-          .select()
-          .from(pomodoroSessions)
-          .where(
-            and(gte(pomodoroSessions.startedAt, fromSec), lte(pomodoroSessions.startedAt, toSec)),
-          )
-          .all()
-        const reportPomos = pomoRows.map((r) => ({
-          startedAt: r.startedAt,
-          durationMin: r.durationMin,
-          completed: r.completed,
-        }))
-
-        // 提醒：time 落在区间（提醒的「发生时间」语义最贴近日报）
-        const reportReminders = listReminders()
-          .filter((r) => r.time >= fromSec && r.time <= toSec)
-          .map((r) => ({ time: r.time, content: r.content, done: r.done }))
+        // 3. 聚合数据（与 preview 共用 aggregateReportData）
+        const data = aggregateReportData(fromSec, toSec)
 
         // 4. 全空拦截（PRD §15.8 风险对策：数据全空别浪费 API）
         if (
-          reportTasks.length === 0 &&
-          reportMsgs.length === 0 &&
-          reportPomos.length === 0 &&
-          reportReminders.length === 0
+          data.tasks.length === 0 &&
+          data.conversations.length === 0 &&
+          data.pomodoros.length === 0 &&
+          data.reminders.length === 0
         ) {
-          return err(params.range === 'daily' ? '今日暂无工作数据（无完成任务/对话/番茄/提醒），无法生成报告' : '本周暂无工作数据（无完成任务/对话/番茄/提醒），无法生成报告')
+          return err(`${buildRangeLabel(params, fromSec, toSec)}暂无工作数据（无完成任务/对话/番茄/提醒），无法生成报告`)
         }
 
-        // 5. 调模型生成 Markdown
-        const payload: ReportPayload = {
-          range: params.range,
-          fromSec,
-          toSec,
-          tasks: reportTasks,
-          conversations: reportMsgs,
-          pomodoros: reportPomos,
-          reminders: reportReminders,
+        // 5. 注册可取消控制器（v1.8.1 打磨）
+        const reqId = params.reqId ?? ''
+        const ac = new AbortController()
+        if (reqId) reportAbortMap.set(reqId, ac)
+
+        try {
+          // 6. 调模型生成 Markdown（传 signal，可被 report:cancel 中断）
+          const payload: ReportPayload = {
+            range: params.range,
+            fromSec,
+            toSec,
+            ...data,
+          }
+          const markdown = await generateReport(reportProviderId, payload, { signal: ac.signal })
+
+          // 7. 写入笔记库（tag 区分日报/周报/自定义，标题带日期）
+          const tag = params.range === 'weekly' ? '周报' : '日报' // custom 归日报 tag
+          const title = buildReportTitle(params.range, fromSec, toSec)
+          const note = createNote({ title, content: markdown, tags: [tag] })
+
+          return ok({ note })
+        } finally {
+          if (reqId) reportAbortMap.delete(reqId)
         }
-        const markdown = await generateReport(reportProviderId, payload)
-
-        // 6. 写入笔记库（tag 区分日报/周报，标题带日期）
-        const tag = params.range === 'daily' ? '日报' : '周报'
-        const title = buildReportTitle(params.range, fromSec, toSec)
-        const note = createNote({ title, content: markdown, tags: [tag] })
-
-        return ok({ note })
       } catch (e) {
         return err(String(e))
       }
     },
   )
+
+  // ---------- report:cancel（v1.8.1 打磨：取消进行中的生成）----------
+  ipcMain.handle('report:cancel', (_, reqId: string): IpcResult<true> => {
+    const ac = reportAbortMap.get(reqId)
+    if (ac) {
+      ac.abort()
+      reportAbortMap.delete(reqId)
+    }
+    return ok(true)
+  })
 }
 
-/** 算报告时间范围（Unix 秒，闭区间）。不传则按 range 默认：daily=今日，weekly=本周一到今天。 */
-function computeRange(params: ReportGenerateParams): { fromSec: number; toSec: number } {
+/**
+ * 聚合报告数据（v1.8.1 抽出，preview 与 generate 共用）。
+ * 按时间范围过滤 tasks(按 completedAt) + messages(按 createdAt) + pomodoros(按 startedAt) + reminders(按 time)。
+ * messages 只取 user/assistant、content 截 200 字、限 50 条（与原 generate 逻辑一致）。
+ */
+function aggregateReportData(fromSec: number, toSec: number): Omit<ReportPayload, 'range' | 'fromSec' | 'toSec'> {
+  const db = getDb()
+
+  // 任务：done + completedAt 落在区间（completedAt 为 null 的历史 done 任务忽略，无法判定何时完成）
+  const reportTasks = listTasks()
+    .filter(
+      (t) =>
+        t.status === 'done' &&
+        t.completedAt !== null &&
+        t.completedAt >= fromSec &&
+        t.completedAt <= toSec,
+    )
+    .map((t) => ({ title: t.title, priority: t.priority, completedAt: t.completedAt }))
+
+  // 对话：按时间范围取（跨所有会话），role 只取 user/assistant（system/tool 噪音），
+  //   content 截前 200 字，总数限 50 条防超长
+  const reportMsgs = listMessagesInRange(fromSec, toSec)
+    .filter((m) => m.role === 'user' || m.role === 'assistant')
+    .slice(0, 50)
+    .map((m) => ({
+      role: m.role as 'user' | 'assistant',
+      content: m.content.length > 200 ? m.content.slice(0, 200) + '…' : m.content,
+      createdAt: m.createdAt,
+    }))
+
+  // 番茄钟：startedAt 落在区间
+  const reportPomos = db
+    .select()
+    .from(pomodoroSessions)
+    .where(and(gte(pomodoroSessions.startedAt, fromSec), lte(pomodoroSessions.startedAt, toSec)))
+    .all()
+    .map((r) => ({ startedAt: r.startedAt, durationMin: r.durationMin, completed: r.completed }))
+
+  // 提醒：time 落在区间（提醒的「发生时间」语义最贴近日报）
+  const reportReminders = listReminders()
+    .filter((r) => r.time >= fromSec && r.time <= toSec)
+    .map((r) => ({ time: r.time, content: r.content, done: r.done }))
+
+  return { tasks: reportTasks, conversations: reportMsgs, pomodoros: reportPomos, reminders: reportReminders }
+}
+
+/** 算报告时间范围（Unix 秒，闭区间）。
+ *  - 显式传 fromSec/toSec：直接用（custom 模式必走此分支）。
+ *  - daily：今日 0:00 ~ 23:59:59。
+ *  - weekly：本周一 0:00 ~ 今天 23:59:59。 */
+function computeRange(params: { range: string; fromSec?: number; toSec?: number }): {
+  fromSec: number
+  toSec: number
+} {
   if (params.fromSec !== undefined && params.toSec !== undefined) {
     return { fromSec: params.fromSec, toSec: params.toSec }
   }
   const now = new Date()
-  // 今天 23:59:59
   const endOfDay = new Date(now)
   endOfDay.setHours(23, 59, 59, 999)
   const toSec = Math.floor(endOfDay.getTime() / 1000)
 
   if (params.range === 'weekly') {
-    // 本周一 0:00（getDay() 周日=0，周一=1；换算成「距周一的天数」）
     const dayOfWeek = now.getDay() === 0 ? 6 : now.getDay() - 1 // 周日=6，周一=0
     const monday = new Date(now)
     monday.setDate(now.getDate() - dayOfWeek)
     monday.setHours(0, 0, 0, 0)
     return { fromSec: Math.floor(monday.getTime() / 1000), toSec }
   }
-  // daily：今日 0:00
+  // daily / 兜底
   const startOfDay = new Date(now)
   startOfDay.setHours(0, 0, 0, 0)
   return { fromSec: Math.floor(startOfDay.getTime() / 1000), toSec }
 }
 
-/** 报告笔记标题：日报「日报 2026-08-04」/ 周报「周报 2026-08-04~2026-08-10」。 */
-function buildReportTitle(range: 'daily' | 'weekly', fromSec: number, toSec: number): string {
-  const fmt = (sec: number): string => {
-    const d = new Date(sec * 1000)
-    const y = d.getFullYear()
-    const m = String(d.getMonth() + 1).padStart(2, '0')
-    const day = String(d.getDate()).padStart(2, '0')
-    return `${y}-${m}-${day}`
-  }
-  return range === 'daily' ? `日报 ${fmt(fromSec)}` : `周报 ${fmt(fromSec)}~${fmt(toSec)}`
+/** 区间标签（UI 展示用）：daily=「今日」/ weekly=「本周」/ custom=「2026-08-01 ~ 2026-08-04」。 */
+function buildRangeLabel(
+  params: { range: string; fromSec?: number; toSec?: number },
+  fromSec: number,
+  toSec: number,
+): string {
+  if (params.range === 'daily') return '今日'
+  if (params.range === 'weekly') return '本周'
+  return `${fmtDate(fromSec)} ~ ${fmtDate(toSec)}`
+}
+
+/** 报告笔记标题：daily「日报 2026-08-04」/ weekly「周报 2026-08-04~2026-08-10」/ custom「日报 2026-08-01~2026-08-04」。 */
+function buildReportTitle(range: string, fromSec: number, toSec: number): string {
+  const prefix = range === 'weekly' ? '周报' : '日报'
+  // daily 单日期；weekly/custom 起止（同一天时不重复）
+  if (range === 'daily' || fromSec === toSec) return `${prefix} ${fmtDate(fromSec)}`
+  return `${prefix} ${fmtDate(fromSec)}~${fmtDate(toSec)}`
+}
+
+/** Unix 秒 → YYYY-MM-DD（本地时区）。 */
+function fmtDate(sec: number): string {
+  const d = new Date(sec * 1000)
+  const y = d.getFullYear()
+  const m = String(d.getMonth() + 1).padStart(2, '0')
+  const day = String(d.getDate()).padStart(2, '0')
+  return `${y}-${m}-${day}`
 }
 
 // ---------- Conversation / Message CRUD（M2，照搬 task 模式） ----------

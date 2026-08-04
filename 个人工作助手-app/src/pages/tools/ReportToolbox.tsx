@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useState, useCallback, useRef } from 'react'
 import {
   ClipboardText,
   Loader2,
@@ -11,49 +11,118 @@ import { invoke } from '@/lib/ipc'
 import { BackHeader } from './ToolsPage'
 import { useNotesStore } from '@/stores/notes'
 import { useNavigate } from '@/pages/overview/nav'
-import type { ReportResult } from '@/types'
+import type { ReportResult, ReportPreviewResult, ReportRange } from '@/types'
 import { cn } from '@/lib/utils'
 
 /**
- * AI 日报/周报工具页（v1.8 M17，PRD §15.3④）。
+ * AI 日报/周报工具页（v1.8 M17，PRD §15.3④ + v1.8.1 打磨）。
  *
  * 照搬 PdfToolbox 骨架（mode 切换 + Status 判别联合）。
  * 生成走非流式（report:generate IPC，主进程聚合数据 + 调模型 + 写笔记库）。
  *
- * PRD §15.8 风险对策：生成前先展示「将基于以下数据」清单，让用户确认范围合理。
- * 报告存为笔记（tag=日报/周报），历史报告用 notes store 过滤 tag 倒序列最近 5 条。
+ * v1.8.1 打磨：
+ *  - 生成后刷新历史列表（修 bug：原 run 成功后 notes 不更新）
+ *  - 实时数据清单（report:preview IPC，模式/日期切换自动拉计数）
+ *  - 日期范围自选（custom 模式 + 两个 date input）
+ *  - 生成中可取消（reqId + report:cancel IPC + AbortController）
  */
 
-type Mode = 'daily' | 'weekly'
+type Mode = ReportRange // 'daily' | 'weekly' | 'custom'
 const MODE_OPTIONS: { value: Mode; label: string }[] = [
   { value: 'daily', label: '日报' },
   { value: 'weekly', label: '周报' },
+  { value: 'custom', label: '自定义' },
 ]
 
 type Status =
   | { kind: 'idle' }
-  | { kind: 'working' }
+  | { kind: 'working'; reqId: string }
   | { kind: 'done'; message: string }
   | { kind: 'error'; message: string }
 
 export function ReportToolbox({ onBack }: { onBack: () => void }) {
   const [mode, setMode] = useState<Mode>('daily')
   const [status, setStatus] = useState<Status>({ kind: 'idle' })
+  const // 自定义日期（YYYY-MM-DD，date input 原生格式）
+    [customFrom, setCustomFrom] = useState(() => todayStr()),
+    [customTo, setCustomTo] = useState(() => todayStr())
+  const [preview, setPreview] = useState<ReportPreviewResult | null>(null)
+  const [previewLoading, setPreviewLoading] = useState(false)
   const { notes, refresh } = useNotesStore()
   const goto = useNavigate()
+  const reqIdRef = useRef(0)
 
+  // 模式对应的 generate 入参（custom 模式把日期字符串转 Unix 秒）
+  const buildParams = useCallback(() => {
+    if (mode === 'custom') {
+      return {
+        range: 'custom' as const,
+        fromSec: strToSec(customFrom, true),
+        toSec: strToSec(customTo, false),
+      }
+    }
+    return { range: mode }
+  }, [mode, customFrom, customTo])
+
+  // 预览：模式或自定义日期变化时拉计数（防抖 300ms，避免快速切模式连发）
   useEffect(() => {
-    refresh()
-  }, [refresh])
+    setPreviewLoading(true)
+    const timer = setTimeout(async () => {
+      try {
+        const p = await invoke<ReportPreviewResult>('report:preview', buildParams())
+        setPreview(p)
+      } catch (e) {
+        // 预览失败不阻塞（生成时会再报错），静默清空
+        setPreview(null)
+      } finally {
+        setPreviewLoading(false)
+      }
+    }, 300)
+    return () => clearTimeout(timer)
+  }, [buildParams])
 
-  // 历史报告：按当前 mode 的 tag 过滤，倒序取最近 5 条
-  const tag = mode === 'daily' ? '日报' : '周报'
+  // 历史报告：日报 tag 含 daily+custom，周报 tag 含 weekly
+  const tag = mode === 'weekly' ? '周报' : '日报'
   const history = notes
     .filter((n) => n.tags.includes(tag))
     .sort((a, b) => b.updatedAt - a.updatedAt)
     .slice(0, 5)
 
   const openNotes = () => goto('notes')
+
+  const run = async () => {
+    // 生成前校验 custom 日期（preview 可能因防抖还没回来，这里再兜底）
+    if (mode === 'custom') {
+      const from = strToSec(customFrom, true)
+      const to = strToSec(customTo, false)
+      if (from > to) {
+        setStatus({ kind: 'error', message: '起始日期不能晚于结束日期' })
+        return
+      }
+    }
+    const reqId = `report-${Date.now()}-${++reqIdRef.current}`
+    setStatus({ kind: 'working', reqId })
+    try {
+      const r = await invoke<ReportResult>('report:generate', { ...buildParams(), reqId })
+      setStatus({
+        kind: 'done',
+        message: `已生成报告笔记：${r.note.title}`,
+      })
+      await refresh() // v1.8.1 打磨：生成后刷新历史列表
+    } catch (e) {
+      setStatus({ kind: 'error', message: String(e) })
+    }
+  }
+
+  const cancel = async () => {
+    if (status.kind !== 'working') return
+    try {
+      await invoke<true>('report:cancel', status.reqId)
+    } catch {
+      // 忽略：取消失败就让请求自然完成
+    }
+    setStatus({ kind: 'idle' })
+  }
 
   return (
     <div className="flex h-full flex-col">
@@ -83,7 +152,55 @@ export function ReportToolbox({ onBack }: { onBack: () => void }) {
             </div>
           </div>
 
-          <GeneratePanel mode={mode} status={status} onStatus={setStatus} onOpenNotes={openNotes} />
+          {/* 自定义日期选择（仅 custom 模式显示）*/}
+          {mode === 'custom' && (
+            <div className="flex items-center justify-center gap-2 text-xs">
+              <input
+                type="date"
+                value={customFrom}
+                onChange={(e) => {
+                  setCustomFrom(e.target.value)
+                  setStatus({ kind: 'idle' })
+                }}
+                className="h-8 rounded-md border border-input bg-background px-2 text-xs"
+              />
+              <span className="text-muted-foreground">至</span>
+              <input
+                type="date"
+                value={customTo}
+                onChange={(e) => {
+                  setCustomTo(e.target.value)
+                  setStatus({ kind: 'idle' })
+                }}
+                className="h-8 rounded-md border border-input bg-background px-2 text-xs"
+              />
+            </div>
+          )}
+
+          {/* 数据清单（v1.8.1：实时计数，PRD §15.8 精确意图）*/}
+          <DataPreview preview={preview} loading={previewLoading} />
+
+          {/* 生成按钮 + 取消按钮 */}
+          <div className="flex gap-2">
+            {status.kind === 'working' ? (
+              <Button variant="outline" onClick={cancel} className="flex-1">
+                取消生成
+              </Button>
+            ) : (
+              <Button
+                onClick={run}
+                disabled={preview?.empty === true}
+                className="flex-1"
+              >
+                {mode === 'daily' ? '生成日报' : mode === 'weekly' ? '生成周报' : '生成报告'}
+              </Button>
+            )}
+            {status.kind === 'done' && (
+              <Button variant="outline" onClick={openNotes}>
+                打开笔记
+              </Button>
+            )}
+          </div>
 
           {/* 历史报告 */}
           <div className="space-y-3 rounded-md border bg-card p-5">
@@ -101,7 +218,10 @@ export function ReportToolbox({ onBack }: { onBack: () => void }) {
             ) : (
               <ul className="space-y-1.5">
                 {history.map((n) => (
-                  <li key={n.id} className="flex items-center gap-2 rounded-md border bg-background px-3 py-2">
+                  <li
+                    key={n.id}
+                    className="flex items-center gap-2 rounded-md border bg-background px-3 py-2"
+                  >
                     <ClipboardText size={14} className="flex-shrink-0 text-muted-foreground" />
                     <span className="flex-1 truncate text-xs">{n.title}</span>
                     <span className="text-[10px] text-muted-foreground">
@@ -120,71 +240,37 @@ export function ReportToolbox({ onBack }: { onBack: () => void }) {
   )
 }
 
-// ---------- 生成面板 ----------
-function GeneratePanel({
-  mode,
-  status,
-  onStatus,
-  onOpenNotes,
+// ---------- 数据清单（v1.8.1 实时计数）----------
+function DataPreview({
+  preview,
+  loading,
 }: {
-  mode: Mode
-  status: Status
-  onStatus: (s: Status) => void
-  onOpenNotes: () => void
+  preview: ReportPreviewResult | null
+  loading: boolean
 }) {
-  const rangeLabel = mode === 'daily' ? '今日' : '本周（周一到今天）'
-
-  const run = async () => {
-    onStatus({ kind: 'working' })
-    try {
-      const r = await invoke<ReportResult>('report:generate', { range: mode })
-      onStatus({
-        kind: 'done',
-        message: `已生成${mode === 'daily' ? '日报' : '周报'}笔记：${r.note.title}`,
-      })
-    } catch (e) {
-      onStatus({ kind: 'error', message: String(e) })
-    }
-  }
-
   return (
-    <div className="space-y-4 rounded-md border bg-card p-5">
-      <div>
-        <h3 className="text-sm font-medium">生成{mode === 'daily' ? '日报' : '周报'}</h3>
-        <p className="mt-1 text-xs text-muted-foreground">
-          汇总{rangeLabel}的完成任务、对话、番茄钟、提醒，AI 生成 Markdown 报告并存入笔记库。
-        </p>
-      </div>
-
-      {/* 数据清单（PRD §15.8：生成前告知用户基于哪些数据）*/}
-      <div className="rounded-md bg-background p-3 text-xs text-muted-foreground">
-        <p className="font-medium text-foreground">将基于以下数据：</p>
-        <ul className="mt-1.5 space-y-0.5">
-          <li>• {rangeLabel}标记完成的任务（按完成时间）</li>
-          <li>• {rangeLabel}的对话记录（最多 50 条，每条截取前 200 字）</li>
-          <li>• {rangeLabel}的番茄钟专注记录</li>
-          <li>• {rangeLabel}触发的提醒</li>
-        </ul>
-        <p className="mt-1.5 text-[10px]">
-          若全部为空将提示无法生成（避免浪费 API）。建议先在设置页「报告模型」选择一个便宜的模型。
-        </p>
-      </div>
-
-      <div className="flex gap-2">
-        <Button
-          onClick={run}
-          disabled={status.kind === 'working'}
-          className="flex-1"
-        >
-          {status.kind === 'working' ? <Loader2 size={14} className="animate-spin" /> : null}
-          生成{mode === 'daily' ? '日报' : '周报'}
-        </Button>
-        {status.kind === 'done' && (
-          <Button variant="outline" onClick={onOpenNotes}>
-            打开笔记
-          </Button>
+    <div className="rounded-md bg-background p-3 text-xs text-muted-foreground">
+      <div className="flex items-center justify-between">
+        <p className="font-medium text-foreground">将基于以下数据</p>
+        {preview && (
+          <span className="text-[10px] text-muted-foreground">{preview.rangeLabel}</span>
         )}
       </div>
+      {loading || !preview ? (
+        <p className="mt-1.5">加载中…</p>
+      ) : preview.empty ? (
+        <p className="mt-1.5 text-warning">所选范围内暂无工作数据，无法生成报告。</p>
+      ) : (
+        <ul className="mt-1.5 grid grid-cols-2 gap-x-3 gap-y-0.5">
+          <li>• 任务：{preview.taskCount} 个</li>
+          <li>• 对话：{preview.messageCount} 条</li>
+          <li>• 专注：{preview.pomoMinutes} 分钟（{preview.pomoCount} 次）</li>
+          <li>• 提醒：{preview.reminderCount} 条</li>
+        </ul>
+      )}
+      <p className="mt-1.5 text-[10px]">
+        建议先在设置页「报告模型」选择一个便宜的模型。
+      </p>
     </div>
   )
 }
@@ -207,4 +293,25 @@ function StatusBlock({ status }: { status: Status }) {
       <span className="break-all">{status.message}</span>
     </div>
   )
+}
+
+// ---------- 日期工具 ----------
+/** 今天日期字符串（YYYY-MM-DD，date input 原生格式）。 */
+function todayStr(): string {
+  const d = new Date()
+  const y = d.getFullYear()
+  const m = String(d.getMonth() + 1).padStart(2, '0')
+  const day = String(d.getDate()).padStart(2, '0')
+  return `${y}-${m}-${day}`
+}
+
+/** YYYY-MM-DD → Unix 秒。
+ *  startOfDay=true 返回当日 0:00:00；false 返回当日 23:59:59（闭区间尾）。 */
+function strToSec(str: string, startOfDay: boolean): number {
+  // new Date('YYYY-MM-DD') 解析为 UTC 0:00，需手动加本地时区偏移
+  const [y, m, d] = str.split('-').map(Number)
+  const date = new Date(y, m - 1, d)
+  if (!startOfDay) date.setHours(23, 59, 59, 999)
+  else date.setHours(0, 0, 0, 0)
+  return Math.floor(date.getTime() / 1000)
 }

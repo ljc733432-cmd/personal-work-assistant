@@ -311,9 +311,11 @@ export interface PdfSplitResult {
   error?: string
 }
 
-// ---------- Report：AI 日报/周报（v1.8 M17） ----------
+// ---------- Report：AI 日报/周报（v1.8 M17 + v1.8.1 打磨） ----------
+export type ReportRange = 'daily' | 'weekly' | 'custom'
+
 export interface ReportPayload {
-  range: 'daily' | 'weekly'
+  range: ReportRange
   fromSec: number
   toSec: number
   tasks: { title: string; priority: TaskPriority; completedAt: number | null }[]
@@ -323,11 +325,28 @@ export interface ReportPayload {
 }
 
 export interface ReportGenerateParams {
-  range: 'daily' | 'weekly'
+  range: ReportRange
   fromSec?: number
   toSec?: number
+  reqId?: string
 }
 
 export interface ReportResult {
   note: Note
+}
+
+export interface ReportPreviewParams {
+  range: ReportRange
+  fromSec?: number
+  toSec?: number
+}
+
+export interface ReportPreviewResult {
+  taskCount: number
+  messageCount: number
+  pomoCount: number
+  pomoMinutes: number
+  reminderCount: number
+  rangeLabel: string
+  empty: boolean
 }

@@ -64,6 +64,8 @@ const ALLOWED_INVOKE = [
   'message:insert',         // 写单条消息（chat:send 落库用，M2）
   'dashboard:activity',     // 看板：按天聚合消息数（v1.4 M14）
   'report:generate',        // AI 日报/周报：聚合任务/对话/番茄/提醒生成报告笔记（v1.8 M17）
+  'report:preview',         // 报告数据预览：返各类计数，不调模型（v1.8.1 打磨）
+  'report:cancel',          // 取消进行中的报告生成（v1.8.1 打磨）
 ] as const
 
 const ALLOWED_SEND = [
