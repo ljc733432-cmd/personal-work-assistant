@@ -44,4 +44,5 @@ export {
   RobotIcon as Bot, // AI 头像
   FileTextIcon as FileText, // 文件
   FilePdfIcon as FilePdf, // PDF 文件（v1.7 PDF 工具箱）
+  ClipboardTextIcon as ClipboardText, // 报告/日报（v1.8 AI 日报/周报）
 } from '@phosphor-icons/react'

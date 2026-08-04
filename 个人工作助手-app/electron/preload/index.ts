@@ -63,6 +63,7 @@ const ALLOWED_INVOKE = [
   'message:list',           // 列某会话全部消息（历史 hydrate，M2）
   'message:insert',         // 写单条消息（chat:send 落库用，M2）
   'dashboard:activity',     // 看板：按天聚合消息数（v1.4 M14）
+  'report:generate',        // AI 日报/周报：聚合任务/对话/番茄/提醒生成报告笔记（v1.8 M17）
 ] as const
 
 const ALLOWED_SEND = [

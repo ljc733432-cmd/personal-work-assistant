@@ -76,6 +76,7 @@ CREATE TABLE IF NOT EXISTS tasks (
   source                   TEXT NOT NULL DEFAULT 'manual',
   source_conversation_id   TEXT,
   followup_log             TEXT,
+  completed_at             INTEGER,                       -- v1.8：完成时间戳（可空）
   created_at               INTEGER NOT NULL DEFAULT (unixepoch()),
   updated_at               INTEGER NOT NULL DEFAULT (unixepoch())
 );
@@ -134,6 +135,15 @@ export function getDb(): BetterSQLite3Database<typeof schema> {
 
   // 启动建表
   _raw.exec(BOOTSTRAP_SQL)
+
+  // v1.8 迁移：tasks 加 completed_at 列（老库补列，新库 CREATE TABLE 已含）。
+  // 项目无 drizzle-kit migrate 框架，老库加列用幂等 ALTER：先 PRAGMA 探测列是否存在。
+  // 模式：后续再加列照抄此块，换表名/列名/DDL。
+  const taskCols = _raw.pragma('table_info(tasks)') as { name: string }[]
+  if (!taskCols.some((c) => c.name === 'completed_at')) {
+    _raw.exec('ALTER TABLE tasks ADD COLUMN completed_at INTEGER')
+    logInfo('[db] 迁移：tasks 已加列 completed_at')
+  }
 
   _db = drizzle(_raw, { schema })
   logInfo('[db] 已初始化：', dbPath)
