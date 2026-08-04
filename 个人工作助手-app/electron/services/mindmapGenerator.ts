@@ -1,4 +1,5 @@
 import { createClientForProvider } from './providers/factory'
+import { logInfo } from './logger'
 
 /**
  * AI 思维导图生成（v1.12，PRD §15.3 AI 产出组）。
@@ -12,24 +13,33 @@ import { createClientForProvider } from './providers/factory'
  *  - topic：用户输主题（如「Q4 产品规划」），AI 自由展开
  *  - material：基于笔记/任务内容生成（信息更丰富）
  *
- * 容错策略（照搬 reportGenerator）：
- *  - 模型返回空 content → 返回兜底 Markdown（不抛错）
+ * 容错策略：
+ *  - 模型返回空 content → 返回兜底 Markdown（不抛错）+ 记 finish_reason 诊断日志
  *  - 剥可能的代码块包裹
- *  - prompt 用「指示性」措辞给明确起始锚点（DeepSeek 禁止性措辞会吞输出，见 v1.10 摘要 bug）
+ *  - prompt 用「指示性」措辞（DeepSeek 在「不要前置说明/不要代码块」等禁止性措辞下会吞输出
+ *    返回空 content，见 v1.10 摘要 bug + noteAssistant 注释）。给明确输出模板 + 起始锚点。
  */
 
 const SYSTEM_PROMPT = `你是一个思维导图生成助手。根据用户的主题或素材，生成一份结构清晰的 Markdown 思维导图。
 
+请按以下格式输出（直接从「# 」一级标题开始，给出完整的标题层级）：
+
+# 主题名称
+
+## 一级分支 A
+### 细分要点 1
+### 细分要点 2
+
+## 一级分支 B
+### 细分要点 1
+
+## 一级分支 C
+
 要求：
 1. 用中文输出。
-2. 用 Markdown 标题层级表达思维导图的层级关系：
-   - 「# 主题」作为思维导图的根节点（1 个）
-   - 「## 一级分支」作为主要方面（3-6 个）
-   - 「### 二级分支」作为每个方面的细分要点（每个一级分支下 2-5 个）
-   - 需要更细时用「####」，但尽量控制在 3 层以内
-3. 每个分支节点用简洁的短语（5-15 字），不要写长句。
-4. 分支之间逻辑独立不重叠（MECE 原则）。
-5. 直接从「# 主题」开始输出，不要用代码块包裹，不要任何前置说明。`
+2. 用 Markdown 标题层级表达思维导图：「# 」是根节点（1 个），「## 」是主要方面（3-6 个），「### 」是细分要点（每个一级分支下 2-5 个）。需要更细时用「#### 」，尽量控制在 3 层以内。
+3. 每个分支节点用简洁的短语（5-15 字），保持精炼。
+4. 分支之间逻辑独立不重叠（MECE 原则）。`
 
 /**
  * 生成思维导图（Markdown 字符串）。
@@ -65,9 +75,13 @@ export async function generateMindmap(
     { timeout: 30000, signal: options.signal },
   )
 
-  const content = res.choices?.[0]?.message?.content ?? ''
+  const choice = res.choices?.[0]
+  const content = choice?.message?.content ?? ''
+  // 空内容诊断日志（照搬 noteAssistant：记 finish_reason 定位是 length/content_filter/stop）
   if (!content.trim()) {
-    return '# 思维导图\n\n（模型未返回内容，请稍后重试）'
+    const finishReason = choice?.finish_reason ?? 'unknown'
+    logInfo(`[mindmap] 空内容：finish_reason=${finishReason} model=${model}`)
+    return '# 思维导图\n\n（模型未返回内容。可能原因：内容过滤/长度限制。请稍后重试，或换一个主题）'
   }
 
   return content
