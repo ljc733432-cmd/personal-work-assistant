@@ -144,6 +144,7 @@ export interface Task {
   parentId: string | null // v1.10 父任务 id（两级层级，null=根任务）
   followupLog: string | null
   completedAt: number | null // v1.8：完成时间戳，status→done 时写
+  tags: string[] // v1.11：任务标签（跨状态/优先级的横向分类）
   createdAt: number
   updatedAt: number
 }
@@ -155,6 +156,7 @@ export interface TaskInput {
   status?: TaskStatus
   priority?: TaskPriority
   dueDate?: number | null
+  tags?: string[] // v1.11：标签，未传时 upsert 更新分支用 existing 兜底
 }
 
 // ---------- Reminder：提醒（M12.5 v1.2 工具扩展） ----------
@@ -354,6 +356,18 @@ export interface ReportGenerateParams {
 
 export interface ReportResult {
   note: Note
+}
+
+// ---------- Mindmap：AI 思维导图（v1.12） ----------
+export interface MindmapGenerateParams {
+  topic?: string
+  material?: string
+  sourceTitle?: string
+  reqId?: string
+}
+export interface MindmapResult {
+  note: Note
+  markdown: string
 }
 
 export interface ReportPreviewParams {

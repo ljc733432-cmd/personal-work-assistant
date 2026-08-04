@@ -1,6 +1,6 @@
 {
   "name": "personal-work-assistant",
-  "version": "0.2.3",
+  "version": "0.2.4",
   "private": true,
   "description": "个人工作助手 - 纯本地多模型 AI 对话桌面应用",
   "license": "MIT",
@@ -26,6 +26,8 @@
     "highlight.js": "^11.11.1",
     "mammoth": "^1.12.0",
     "marked": "^18.0.7",
+    "markmap-lib": "^0.18.12",
+    "markmap-view": "^0.18.12",
     "node-cron": "^4.6.0",
     "openai": "^4.77.0",
     "pdf-lib": "^1.17.1",

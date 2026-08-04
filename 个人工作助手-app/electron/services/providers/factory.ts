@@ -6,6 +6,20 @@ import { getSecret } from '../secret'
 import type { Provider, WorkDir, Task, Reminder } from '../../types'
 
 /**
+ * v1.11：解析 tags 列（JSON 字符串 → string[]）。容错：解析失败返 []，
+ * 不让坏数据 crash task:list。导出给 ipc/index.ts 的 rowToTask 复用。
+ */
+export function parseTags(raw: unknown): string[] {
+  if (typeof raw !== 'string') return []
+  try {
+    const parsed = JSON.parse(raw)
+    return Array.isArray(parsed) ? parsed.filter((t) => typeof t === 'string') : []
+  } catch {
+    return []
+  }
+}
+
+/**
  * Provider 加载 + OpenAI client 工厂。
  *
  * 业务模型：库里存 Provider 配置（含 apiKeyRef），明文 Key 在 safeStorage。
@@ -124,6 +138,7 @@ function rowToTask(r: typeof tasks.$inferSelect): Task {
     parentId: r.parentId,
     followupLog: r.followupLog,
     completedAt: r.completedAt,
+    tags: parseTags(r.tags),
     createdAt: r.createdAt,
     updatedAt: r.updatedAt,
   }

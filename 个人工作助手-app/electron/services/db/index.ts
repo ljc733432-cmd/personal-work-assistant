@@ -79,6 +79,7 @@ CREATE TABLE IF NOT EXISTS tasks (
   parent_id                TEXT,                          -- v1.10：父任务 id（两级层级，可空）
   followup_log             TEXT,
   completed_at             INTEGER,                       -- v1.8：完成时间戳（可空）
+  tags                     TEXT NOT NULL DEFAULT '[]',     -- v1.11：任务标签（JSON 字符串）
   created_at               INTEGER NOT NULL DEFAULT (unixepoch()),
   updated_at               INTEGER NOT NULL DEFAULT (unixepoch())
 );
@@ -155,6 +156,11 @@ export function getDb(): BetterSQLite3Database<typeof schema> {
   if (!taskCols.some((c) => c.name === 'parent_id')) {
     _raw.exec('ALTER TABLE tasks ADD COLUMN parent_id TEXT')
     logInfo('[db] 迁移：tasks 已加列 parent_id')
+  }
+  // v1.11 迁移：tasks 加 tags 列（任务标签，JSON 字符串，照搬幂等 ALTER 模式）
+  if (!taskCols.some((c) => c.name === 'tags')) {
+    _raw.exec("ALTER TABLE tasks ADD COLUMN tags TEXT NOT NULL DEFAULT '[]'")
+    logInfo('[db] 迁移：tasks 已加列 tags')
   }
 
   // v1.10.8 数据修复：清除孤儿子任务（parent_id 指向已不存在的任务）。

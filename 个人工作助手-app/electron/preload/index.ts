@@ -70,6 +70,8 @@ const ALLOWED_INVOKE = [
   'report:generate',        // AI 日报/周报：聚合任务/对话/番茄/提醒生成报告笔记（v1.8 M17）
   'report:preview',         // 报告数据预览：返各类计数，不调模型（v1.8.1 打磨）
   'report:cancel',          // 取消进行中的报告生成（v1.8.1 打磨）
+  'mindmap:generate',       // AI 思维导图：主题/素材生成 Markdown 层级，markmap 渲染（v1.12）
+  'mindmap:cancel',         // 取消进行中的思维导图生成（v1.12）
   'note:ai',                // AI 笔记助手：摘要/待办/提问/续写（v1.9 M18）
   'note:ai_cancel',         // 取消进行中的笔记 AI 操作（v1.9 M18）
 ] as const
