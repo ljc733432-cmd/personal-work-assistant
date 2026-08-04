@@ -350,3 +350,17 @@ export interface ReportPreviewResult {
   rangeLabel: string
   empty: boolean
 }
+
+// ---------- NoteAiAssist：AI 笔记助手（v1.9 M18） ----------
+export type NoteAiOp = 'summary' | 'todos' | 'questions' | 'continue'
+
+export interface NoteAiParams {
+  op: NoteAiOp
+  content: string
+  question?: string
+  reqId?: string
+}
+
+export interface NoteAiResult {
+  result: string
+}

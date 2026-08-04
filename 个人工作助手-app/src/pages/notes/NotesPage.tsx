@@ -1,5 +1,16 @@
-import { useEffect, useState } from 'react'
-import { Plus, Search, Eye, Pencil, Trash2, FileText } from '@/components/ui/icons'
+import { useEffect, useState, useRef } from 'react'
+import {
+  Plus,
+  Search,
+  Eye,
+  Pencil,
+  Trash2,
+  FileText,
+  Sparkles,
+  X,
+  CheckCircle2,
+  AlertCircle,
+} from '@/components/ui/icons'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Textarea } from '@/components/ui/textarea'
@@ -8,13 +19,16 @@ import { EmptyState } from '@/components/ui/EmptyState'
 import { useNotesStore } from '@/stores/notes'
 import { invoke } from '@/lib/ipc'
 import { cn } from '@/lib/utils'
-import type { Note, NoteSearchHit } from '@/types'
+import type { Note, NoteSearchHit, NoteAiOp, NoteAiResult } from '@/types'
 
 /**
- * 笔记页（M12.8 B 轨，PRD §12.4）。
- * 左列笔记列表（含搜索）+ 中间编辑器（编辑/预览切换）。
+ * 笔记页（M12.8 B 轨 + v1.9 M18 AI 笔记助手）。
+ * 左列笔记列表（含搜索）+ 中间编辑器（编辑/预览切换）+ AI 助手内联面板。
  * 双轨数据一致（PRD §13.1）：AI 在对话里 create_note 写入同一笔记库，
  * 用户切到本页 refresh 即可看到；反之用户编辑的笔记 AI 也能搜到。
+ *
+ * v1.9 AI 笔记助手（PRD §15.2①）：对当前笔记执行 摘要/待办/提问/续写，
+ * 结果以内联面板展示（Markdown 渲染），用户点「插入」才写进笔记（不静默改）。
  */
 export function NotesPage() {
   const { notes, refresh, create, update, remove } = useNotesStore()
@@ -22,6 +36,7 @@ export function NotesPage() {
   const [query, setQuery] = useState('')
   const [hits, setHits] = useState<NoteSearchHit[] | null>(null)
   const [editing, setEditing] = useState(false)
+  const [aiPanelOpen, setAiPanelOpen] = useState(false)
   // 当前编辑缓冲（标题/正文/标签），保存时落库
   const [draftTitle, setDraftTitle] = useState('')
   const [draftContent, setDraftContent] = useState('')
@@ -38,6 +53,7 @@ export function NotesPage() {
       setDraftTitle(active.title)
       setDraftContent(active.content)
       setEditing(false)
+      setAiPanelOpen(false) // 切笔记时收起 AI 面板
     }
   }, [activeId]) // eslint-disable-line react-hooks/exhaustive-deps
 
@@ -88,6 +104,24 @@ export function NotesPage() {
       setHits(result)
     } catch {
       setHits(null)
+    }
+  }
+
+  // AI 面板「插入到笔记末尾」回调：把结果追加到 draftContent 并落库
+  const handleInsertAi = async (opLabel: string, result: string) => {
+    if (!active) return
+    const newContent = `${draftContent}\n\n## AI 生成（${opLabel}）\n\n${result}\n`
+    setDraftContent(newContent)
+    try {
+      await update({
+        id: active.id,
+        title: draftTitle.trim() || '无标题笔记',
+        content: newContent,
+        tags: active.tags,
+      })
+      setAiPanelOpen(false) // 插入后收起面板
+    } catch (e) {
+      console.error('[notes] AI 插入失败', e)
     }
   }
 
@@ -177,10 +211,28 @@ export function NotesPage() {
                   <Eye size={13} /> 预览
                 </Button>
               )}
+              {/* AI 助手触发器（v1.9 M18）：切换内联面板 */}
+              <Button
+                size="sm"
+                variant={aiPanelOpen ? 'default' : 'outline'}
+                onClick={() => setAiPanelOpen((v) => !v)}
+                className="h-8 gap-1.5"
+              >
+                <Sparkles size={13} /> AI 助手
+              </Button>
               <Button size="sm" variant="ghost" onClick={handleDelete} className="h-8 text-destructive">
                 <Trash2 size={14} />
               </Button>
             </div>
+
+            {/* AI 助手内联面板（v1.9 M18）：正文区上方，可折叠 */}
+            {aiPanelOpen && (
+              <NoteAiPanel
+                content={draftContent}
+                onInsert={handleInsertAi}
+                onClose={() => setAiPanelOpen(false)}
+              />
+            )}
 
             {/* 正文 */}
             <div className="flex-1 overflow-y-auto px-6 py-4">
@@ -210,6 +262,168 @@ export function NotesPage() {
             title="选择一条笔记"
             hint="从左侧选一条笔记开始编辑，或点「新建笔记」创建。也可在对话里说「把这段存成笔记」让 AI 帮你记"
           />
+        )}
+      </div>
+    </div>
+  )
+}
+
+// ---------- AI 助手内联面板（v1.9 M18） ----------
+const AI_OPS: { value: NoteAiOp; label: string }[] = [
+  { value: 'summary', label: '摘要' },
+  { value: 'todos', label: '提炼待办' },
+  { value: 'questions', label: '提问' },
+  { value: 'continue', label: '续写' },
+]
+
+type AiStatus =
+  | { kind: 'idle' }
+  | { kind: 'working'; reqId: string }
+  | { kind: 'done' }
+  | { kind: 'error'; message: string }
+
+function NoteAiPanel({
+  content,
+  onInsert,
+  onClose,
+}: {
+  content: string
+  onInsert: (opLabel: string, result: string) => void
+  onClose: () => void
+}) {
+  const [op, setOp] = useState<NoteAiOp>('summary')
+  const [question, setQuestion] = useState('')
+  const [result, setResult] = useState('')
+  const [status, setStatus] = useState<AiStatus>({ kind: 'idle' })
+  const reqIdRef = useRef(0)
+
+  const run = async () => {
+    if (!content.trim()) {
+      setStatus({ kind: 'error', message: '笔记内容为空' })
+      return
+    }
+    const reqId = `note-ai-${Date.now()}-${++reqIdRef.current}`
+    setStatus({ kind: 'working', reqId })
+    setResult('')
+    try {
+      const r = await invoke<NoteAiResult>('note:ai', {
+        op,
+        content,
+        question: op === 'questions' ? question : undefined,
+        reqId,
+      })
+      setResult(r.result)
+      setStatus({ kind: 'done' })
+    } catch (e) {
+      setStatus({ kind: 'error', message: String(e) })
+    }
+  }
+
+  const cancel = async () => {
+    if (status.kind !== 'working') return
+    try {
+      await invoke<true>('note:ai_cancel', status.reqId)
+    } catch {
+      // 忽略
+    }
+    setStatus({ kind: 'idle' })
+  }
+
+  const copy = async () => {
+    try {
+      await navigator.clipboard.writeText(result)
+    } catch {
+      // 忽略
+    }
+  }
+
+  const opLabel = AI_OPS.find((o) => o.value === op)?.label ?? op
+
+  return (
+    <div className="border-b bg-surface-2">
+      <div className="mx-auto max-w-3xl space-y-3 px-6 py-3">
+        {/* 头部：操作切换 + 关闭 */}
+        <div className="flex items-center justify-between">
+          <div className="flex items-center gap-1 rounded-lg bg-surface-3 p-1">
+            {AI_OPS.map((o) => (
+              <button
+                key={o.value}
+                onClick={() => {
+                  setOp(o.value)
+                  setStatus({ kind: 'idle' })
+                  setResult('')
+                }}
+                className={cn(
+                  'rounded-md px-3 py-1 text-xs font-medium transition-colors',
+                  op === o.value
+                    ? 'bg-accent/10 text-accent shadow-xs'
+                    : 'text-muted-foreground hover:text-foreground',
+                )}
+              >
+                {o.label}
+              </button>
+            ))}
+          </div>
+          <button
+            onClick={onClose}
+            className="text-muted-foreground transition-colors hover:text-foreground"
+          >
+            <X size={16} />
+          </button>
+        </div>
+
+        {/* questions 模式：额外输入框 */}
+        {op === 'questions' && (
+          <Input
+            value={question}
+            onChange={(e) => setQuestion(e.target.value)}
+            placeholder="可选：输入你想问的具体问题（留空则 AI 自行提问）"
+            className="h-8 text-xs"
+          />
+        )}
+
+        {/* 操作按钮 */}
+        <div className="flex gap-2">
+          {status.kind === 'working' ? (
+            <Button variant="outline" size="sm" onClick={cancel} className="flex-1">
+              取消
+            </Button>
+          ) : (
+            <Button size="sm" onClick={run} disabled={!content.trim()} className="flex-1">
+              <Sparkles size={13} /> {opLabel}
+            </Button>
+          )}
+        </div>
+
+        {/* 结果区 */}
+        {result && (
+          <div className="space-y-2 rounded-md border bg-background p-3">
+            <div className="msg-markdown max-h-60 overflow-y-auto text-sm">
+              <Markdown content={result} />
+            </div>
+            <div className="flex gap-2">
+              <Button size="sm" variant="default" onClick={() => onInsert(opLabel, result)}>
+                插入到笔记末尾
+              </Button>
+              <Button size="sm" variant="outline" onClick={copy}>
+                复制
+              </Button>
+            </div>
+          </div>
+        )}
+
+        {/* 状态反馈 */}
+        {status.kind === 'error' && (
+          <div className="flex items-start gap-2 rounded-md bg-destructive/10 p-2 text-xs text-destructive">
+            <AlertCircle size={13} className="mt-0.5" />
+            <span className="break-all">{status.message}</span>
+          </div>
+        )}
+        {status.kind === 'done' && !result && (
+          <div className="flex items-start gap-2 rounded-md bg-success/10 p-2 text-xs text-success">
+            <CheckCircle2 size={13} className="mt-0.5" />
+            <span>操作完成，但模型未返回内容</span>
+          </div>
         )}
       </div>
     </div>
