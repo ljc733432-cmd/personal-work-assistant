@@ -50,6 +50,11 @@ const ALLOWED_INVOKE = [
   'convert:targets',        // 查转换支持的目标格式（M12.9 v1.2）
   'convert:run',            // 执行文档转换
   'convert:pickFile',       // 选输入文件（dialog）
+  'pdf:info',               // PDF 工具箱：查页数（v1.7 M16）
+  'pdf:merge',              // PDF 工具箱：合并
+  'pdf:extract',            // PDF 工具箱：提取页
+  'pdf:split',              // PDF 工具箱：拆分
+  'pdf:pickFile',           // PDF 工具箱：选 PDF 文件（dialog）
   'conversation:list',      // 列会话（侧栏，M2）
   'conversation:create',    // 新建会话
   'conversation:rename',    // 重命名会话

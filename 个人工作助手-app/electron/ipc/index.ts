@@ -41,6 +41,7 @@ import {
 } from '../services/notes/noteStore'
 import { getNotesDir, setNotesDir } from '../services/notes/config'
 import { convertDocument, supportedTargets } from '../services/converter'
+import { getPdfInfo, mergePdfs, extractPages, splitPdf } from '../services/pdfToolbox'
 import { chatWithProvider, type ChatResult } from '../services/providers/chat'
 import { truncateByTokenBudget } from '../services/providers/truncate'
 import { resolveProviderId } from '../services/providers/router'
@@ -79,6 +80,9 @@ import type {
   MessageToolCall,
   ActivityPoint,
   ActivityQuery,
+  PdfInfo,
+  PdfResult,
+  PdfSplitResult,
 } from '../types'
 
 /**
@@ -997,6 +1001,71 @@ function registerConverterHandlers() {
   })
 }
 
+// ---------- PDF Toolbox handlers（v1.7 M16，PRD §15.4⑥） ----------
+// 纯 pdf-lib 操作（合并/提取/拆分），路径安全在 pdfToolbox 内经 resolveSafePath。
+function registerPdfHandlers() {
+  // 查页数（UI 辅助：显示总页数，辅助提取/拆分输入）
+  ipcMain.handle('pdf:info', async (_, inputPath: string): Promise<IpcResult<PdfInfo>> => {
+    try {
+      return ok(await getPdfInfo(inputPath))
+    } catch (e) {
+      return err(String(e))
+    }
+  })
+
+  // 合并：paths[] 按顺序合并到 outputPath
+  ipcMain.handle(
+    'pdf:merge',
+    async (_, paths: string[], outputPath: string): Promise<IpcResult<PdfResult>> => {
+      try {
+        return ok(await mergePdfs(paths, outputPath))
+      } catch (e) {
+        return err(String(e))
+      }
+    },
+  )
+
+  // 提取：pagesInput 是 1-indexed 用户输入（如 "1,3,5-7"），服务层解析
+  ipcMain.handle(
+    'pdf:extract',
+    async (_, inputPath: string, pagesInput: string, outputPath: string): Promise<IpcResult<PdfResult>> => {
+      try {
+        return ok(await extractPages(inputPath, pagesInput, outputPath))
+      } catch (e) {
+        return err(String(e))
+      }
+    },
+  )
+
+  // 拆分：perChunk 每份页数，输出到 outputDir
+  ipcMain.handle(
+    'pdf:split',
+    async (_, inputPath: string, perChunk: number, outputDir: string): Promise<IpcResult<PdfSplitResult>> => {
+      try {
+        return ok(await splitPdf(inputPath, perChunk, outputDir))
+      } catch (e) {
+        return err(String(e))
+      }
+    },
+  )
+
+  // 选 PDF 文件（dialog，B 轨 UI 用，照搬 convert:pickFile）
+  ipcMain.handle('pdf:pickFile', async (): Promise<IpcResult<string | null>> => {
+    try {
+      const { dialog } = await import('electron')
+      const win = BrowserWindow.getAllWindows()[0] ?? null
+      const result = await dialog.showOpenDialog(win!, {
+        properties: ['openFile'],
+        filters: [{ name: 'PDF', extensions: ['pdf'] }],
+      })
+      if (result.canceled || result.filePaths.length === 0) return ok(null)
+      return ok(result.filePaths[0])
+    } catch (e) {
+      return err(String(e))
+    }
+  })
+}
+
 function registerDbHandlers() {
   ipcMain.handle('db:health', (): IpcResult<{ ok: boolean; dbPath: string; detail: string }> => {
     return ok(dbHealthCheck())
@@ -1197,6 +1266,7 @@ export function registerIpcHandlers() {
   registerPomodoroHandlers()
   registerNoteHandlers()
   registerConverterHandlers()
+  registerPdfHandlers()
   registerConversationHandlers()
   registerDbHandlers()
   registerDashboardHandlers()

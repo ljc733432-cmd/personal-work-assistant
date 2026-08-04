@@ -175,6 +175,15 @@ write_file 覆盖已存在文件时，FC 循环**挂起**：返回 `{kind:'confi
 - **安全**：输入输出路径经 `resolveSafePath`（白名单/笔记库）。
 - **无破坏性**：原文件不动，输出到同目录换扩展名。不走二次确认。
 
+### **PdfToolbox（PDF 工具箱，v1.7 工具，PRD §15.4⑥）**
+纯客户端 PDF 页面操作（pdf-lib）。**区别于 Converter**：Converter 是格式转换（md→pdf 生成），PdfToolbox 是已有 PDF 的页面操作。
+- **三个操作**：合并（多个→一个）/ 提取（指定页码→新 PDF）/ 拆分（按每份页数→多个）。
+- **压缩砍 v2**：pdf-lib 无真压缩能力（PRD 明确，UI 标注 v2）。
+- **预览推迟**：pdfjs-dist worker 在 Electron+Vite 下配置是坑，MVP 不做。
+- **页码约定**：UI 1-indexed（用户输入「1,3,5-7」），内部 0-indexed（pdf-lib 要求），服务层 `parsePageInput` 转换。
+- **安全**：路径经 `resolveSafePath`（照搬 converter）。
+- **不要叫**："PDF 转换"——会与 Converter 混淆；PdfToolbox 特指页面操作。
+
 ### **语义色 token（Semantic Color Token，v1.2 UI）**
 取代散落的 Tailwind 原生色类（`bg-blue-100` 等）。见 PRD §12.2.1 + 验收 V-O。
 - `--success`（完成/通过）/ `--warning`（草稿/警示）/ `--danger`（错误/危险）/ `--info`（信息提示，同 accent）。

@@ -309,3 +309,21 @@ export interface ModelTier {
   name: string
   providerId: string
 }
+
+// ---------- PDF Toolbox（v1.7 M16，PRD §15.4⑥） ----------
+export interface PdfInfo {
+  pageCount: number
+}
+
+export interface PdfResult {
+  ok: boolean
+  outputPath: string
+  bytes: number
+  error?: string
+}
+
+export interface PdfSplitResult {
+  ok: boolean
+  outputs: string[]
+  error?: string
+}

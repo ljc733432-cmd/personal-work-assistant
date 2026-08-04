@@ -1,19 +1,16 @@
 import { useState } from 'react'
-import { Bell, Timer, FileText, ArrowLeft } from '@/components/ui/icons'
+import { Bell, Timer, FileText, ArrowLeft, FilePdf } from '@/components/ui/icons'
 import { cn } from '@/lib/utils'
 import { ReminderSection } from './ReminderSection'
 import { ConverterSection } from './ConverterSection'
+import { PdfToolbox } from './PdfToolbox'
 
 /**
- * 工具页（M12.5~M12.9 v1.2 工具扩展）。
+ * 工具页（M12.5~M12.9 v1.2 + M16 v1.7 工具扩展）。
  * PRD §12.3：卡片网格入口 → 点进具体工具。
- * v1.2 四基础工具里：
- *   - 提醒（M12.5，本页内联）
- *   - 番茄钟（M12.6，顶栏小部件，本页只放说明卡）
- *   - 文档转换（M12.9，独立子页）
- *   - 笔记（M12.7~8，独立导航项，不在此）
+ * v1.2 四基础工具 + v1.7 PDF 工具箱。
  */
-type Tool = 'reminders' | 'pomodoro' | 'converter' | null
+type Tool = 'reminders' | 'pomodoro' | 'converter' | 'pdf' | null
 
 export function ToolsPage() {
   const [active, setActive] = useState<Tool>(null)
@@ -23,6 +20,9 @@ export function ToolsPage() {
   }
   if (active === 'converter') {
     return <ConverterSection onBack={() => setActive(null)} />
+  }
+  if (active === 'pdf') {
+    return <PdfToolbox onBack={() => setActive(null)} />
   }
 
   return (
@@ -50,6 +50,12 @@ export function ToolsPage() {
             title="文档转换"
             desc="Markdown / DOCX / PDF 互转"
             onClick={() => setActive('converter')}
+          />
+          <ToolCard
+            icon={FilePdf}
+            title="PDF 工具箱"
+            desc="合并 / 提取 / 拆分"
+            onClick={() => setActive('pdf')}
           />
         </div>
       </div>

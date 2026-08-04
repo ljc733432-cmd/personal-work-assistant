@@ -43,4 +43,5 @@ export {
   UserIcon as User, // 用户头像
   RobotIcon as Bot, // AI 头像
   FileTextIcon as FileText, // 文件
+  FilePdfIcon as FilePdf, // PDF 文件（v1.7 PDF 工具箱）
 } from '@phosphor-icons/react'
