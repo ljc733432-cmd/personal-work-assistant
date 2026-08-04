@@ -766,10 +766,10 @@ function registerTaskHandlers() {
 
   // v1.10.5：手动移动任务到某父任务下（或移出变根任务）。
   // 入参 { id, parentId }：parentId=null 变根任务；parentId=某根任务 id 变其子任务。
-  // 两级限制：只允许把根任务移到另一个根任务下（不接受已是子任务的任务再被移动成别处的子任务，避免循环和三级）。
-  // 防循环：parentId 不能是自己；parentId 不能是自己的子任务（但两级模型下自己若是根任务则无子任务可循环，安全）。
-  // v1.10.6 修复：移动一个有子任务的根任务时，它的子任务跟着提升为根任务（parentId 清空），
-  //   否则子任务的 parentId 指向一个"不再是根"的父，前端 rootTasks 不含该父导致子任务不显示（看似被删）。
+  // 两级限制：只允许把根任务移到另一个根任务下。
+  // v1.10.7 语义修正：移动一个有子任务的根任务 A 到 B 下时，A 的子任务跟着搬到 B 下
+  //   （和 A 平级，都成 B 的直接子任务），而非变成独立根任务丢失归属。整组不散。
+  //   - 移出变根（parentId=null）时：A 的子任务保持原样（仍是 A 的子任务），只 A 自己变根。
   ipcMain.handle(
     'task:set_parent',
     (_, params: { id: string; parentId: string | null }): IpcResult<true> => {
@@ -780,15 +780,16 @@ function registerTaskHandlers() {
           ? db.select().from(tasks).where(eq(tasks.id, params.parentId)).get()
           : null
         if (params.parentId && !target) return err('目标父任务不存在')
-        // 目标若是子任务（有 parentId），拒绝（避免三级）
         if (target?.parentId) return err('目标已是子任务，不能再嵌套（仅支持两级）')
         const now = Math.floor(Date.now() / 1000)
-        // 先把被移动任务的子任务提升为根（避免孤儿）
-        db.update(tasks)
-          .set({ parentId: null, updatedAt: now })
-          .where(eq(tasks.parentId, params.id))
-          .run()
-        // 再移动本任务
+        if (params.parentId) {
+          // 移到某父下：A 的子任务也改成指向新父（平级搬到 B 下，整组不散）
+          db.update(tasks)
+            .set({ parentId: params.parentId, updatedAt: now })
+            .where(eq(tasks.parentId, params.id))
+            .run()
+        }
+        // 移动本任务（移出变根时只改自己，子任务保持原 parentId 不动）
         db.update(tasks)
           .set({ parentId: params.parentId, updatedAt: now })
           .where(eq(tasks.id, params.id))
