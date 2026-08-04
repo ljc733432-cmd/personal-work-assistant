@@ -103,7 +103,7 @@ export interface SearchProviderInput {
 // ---------- Task：任务（M3，含 M4/M6 预留字段） ----------
 export type TaskStatus = 'todo' | 'in_progress' | 'done'
 export type TaskPriority = 'low' | 'medium' | 'high'
-export type TaskSource = 'manual' | 'from_chat'
+export type TaskSource = 'manual' | 'from_chat' | 'from_note'
 
 export interface Task {
   id: string
@@ -114,6 +114,7 @@ export interface Task {
   dueDate: number | null // Unix 秒，null=无截止
   source: TaskSource
   sourceConversationId: string | null // M4 溯源用
+  sourceNotePath: string | null // v1.9.1 笔记转任务溯源（笔记 fileName，可空）
   followupLog: string | null // M6 跟进日志
   completedAt: number | null // v1.8：完成时间戳，status→done 时写，null=未完成
   createdAt: number
@@ -150,6 +151,15 @@ export interface TaskDraftInput {
   priority?: TaskPriority
   dueDate?: number | null
   conversationId: string // 溯源用，入库填 sourceConversationId
+}
+
+/** 笔记转任务入参（v1.9.1，渲染层 → task:create_from_note，PRD §15.2②）。
+ *  sourceNotePath 服务端从 noteId 解析为 fileName 填充（不信任前端传路径）。 */
+export interface TaskFromNoteInput {
+  title: string
+  noteId: string // 笔记 frontmatter id（稳定主键）
+  priority?: TaskPriority
+  dueDate?: number | null
 }
 
 // ---------- Conversation / Message（M2 对话历史持久化） ----------

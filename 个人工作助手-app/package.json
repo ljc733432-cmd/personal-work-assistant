@@ -1,6 +1,6 @@
 {
   "name": "personal-work-assistant",
-  "version": "0.1.4",
+  "version": "0.1.5",
   "private": true,
   "description": "个人工作助手 - 纯本地多模型 AI 对话桌面应用",
   "license": "MIT",

@@ -94,8 +94,10 @@ export const tasks = sqliteTable('tasks', {
   status: text('status', { enum: ['todo', 'in_progress', 'done'] }).notNull().default('todo'),
   priority: text('priority', { enum: ['low', 'medium', 'high'] }).notNull().default('medium'),
   dueDate: integer('due_date', { mode: 'number' }), // Unix 秒，可空，null=无截止
-  source: text('source', { enum: ['manual', 'from_chat'] }).notNull().default('manual'),
+  source: text('source', { enum: ['manual', 'from_chat', 'from_note'] }).notNull().default('manual'),
   sourceConversationId: text('source_conversation_id'), // M4 溯源用，可空
+  // v1.9.1：笔记转任务溯源（PRD §15.6），存笔记 fileName（笔记库内唯一稳定）。可空。
+  sourceNotePath: text('source_note_path'),
   followupLog: text('followup_log'), // M6 跟进日志，可空
   // v1.8：完成时间戳（精确「今日完成」用于日报）。status→done 时写，切回非 done 清空。
   // 老库迁移见 db/index.ts 的幂等 ALTER（项目无 migrate 框架）。

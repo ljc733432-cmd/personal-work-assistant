@@ -75,6 +75,7 @@ CREATE TABLE IF NOT EXISTS tasks (
   due_date                 INTEGER,
   source                   TEXT NOT NULL DEFAULT 'manual',
   source_conversation_id   TEXT,
+  source_note_path         TEXT,                          -- v1.9.1：笔记转任务溯源（笔记 fileName，可空）
   followup_log             TEXT,
   completed_at             INTEGER,                       -- v1.8：完成时间戳（可空）
   created_at               INTEGER NOT NULL DEFAULT (unixepoch()),
@@ -143,6 +144,11 @@ export function getDb(): BetterSQLite3Database<typeof schema> {
   if (!taskCols.some((c) => c.name === 'completed_at')) {
     _raw.exec('ALTER TABLE tasks ADD COLUMN completed_at INTEGER')
     logInfo('[db] 迁移：tasks 已加列 completed_at')
+  }
+  // v1.9.1 迁移：tasks 加 source_note_path 列（笔记转任务溯源，照搬 completed_at 幂等 ALTER 模式）
+  if (!taskCols.some((c) => c.name === 'source_note_path')) {
+    _raw.exec('ALTER TABLE tasks ADD COLUMN source_note_path TEXT')
+    logInfo('[db] 迁移：tasks 已加列 source_note_path')
   }
 
   _db = drizzle(_raw, { schema })

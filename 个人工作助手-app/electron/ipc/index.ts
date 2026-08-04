@@ -66,6 +66,7 @@ import type {
   TaskInput,
   TaskDraft,
   TaskDraftInput,
+  TaskFromNoteInput,
   Reminder,
   ReminderInput,
   PomodoroSession,
@@ -664,6 +665,7 @@ function rowToTask(row: typeof tasks.$inferSelect): Task {
     dueDate: row.dueDate,
     source: row.source,
     sourceConversationId: row.sourceConversationId,
+    sourceNotePath: row.sourceNotePath,
     followupLog: row.followupLog,
     completedAt: row.completedAt,
     createdAt: row.createdAt,
@@ -778,6 +780,33 @@ function registerTaskHandlers() {
           dueDate: input.dueDate ?? null,
           source: 'from_chat',
           sourceConversationId: input.conversationId, // 溯源
+        })
+        .run()
+      const row = db.select().from(tasks).where(eq(tasks.id, id)).get()!
+      return ok(rowToTask(row))
+    } catch (e) {
+      return err(String(e))
+    }
+  })
+
+  // v1.9.1：笔记转任务（PRD §15.2②）。与 create_from_draft 平行，
+  // source 强制 from_note + 填 sourceNotePath（从 noteId 解析为 fileName，不信任前端传路径）。
+  // 不静默入库——前端点「转任务」按钮才调（与抽取草稿确认同源）。
+  ipcMain.handle('task:create_from_note', (_, input: TaskFromNoteInput): IpcResult<Task> => {
+    try {
+      const note = getNote(input.noteId)
+      if (!note) return err('笔记不存在，可能已被删除')
+      const db = getDb()
+      const id = randomUUID()
+      db.insert(tasks)
+        .values({
+          id,
+          title: input.title,
+          status: 'todo',
+          priority: input.priority ?? 'medium',
+          dueDate: input.dueDate ?? null,
+          source: 'from_note',
+          sourceNotePath: note.fileName, // 溯源（笔记库内 fileName 唯一稳定）
         })
         .run()
       const row = db.select().from(tasks).where(eq(tasks.id, id)).get()!

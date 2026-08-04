@@ -120,6 +120,7 @@ function rowToTask(r: typeof tasks.$inferSelect): Task {
     dueDate: r.dueDate,
     source: r.source,
     sourceConversationId: r.sourceConversationId,
+    sourceNotePath: r.sourceNotePath,
     followupLog: r.followupLog,
     completedAt: r.completedAt,
     createdAt: r.createdAt,
