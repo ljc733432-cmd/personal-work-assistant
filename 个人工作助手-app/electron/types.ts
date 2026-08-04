@@ -172,6 +172,12 @@ export interface TaskSubtaskInput {
   dueDate?: number | null
 }
 
+/** v1.10.1：删任务入参。cascade=true 时级联删子任务（删根任务用）。 */
+export interface TaskDeleteParams {
+  id: string
+  cascade?: boolean
+}
+
 // ---------- Conversation / Message（M2 对话历史持久化） ----------
 // 见 PRD §4.2、CONTEXT.md「Conversation」「Message」。
 // type=normal 普通会话；type=followup 跟进会话（M6）。

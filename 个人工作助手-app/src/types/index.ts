@@ -269,6 +269,11 @@ export interface TaskSubtaskInput {
   dueDate?: number | null
 }
 
+export interface TaskDeleteParams {
+  id: string
+  cascade?: boolean
+}
+
 // ---------- 工具确认请求（write_file 覆盖等） ----------
 export interface ConfirmRequest {
   reqId: string

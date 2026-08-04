@@ -1,5 +1,12 @@
 import { create } from 'zustand'
-import type { Task, TaskDraftInput, TaskFromNoteInput, TaskSubtaskInput, TaskInput } from '@/types'
+import type {
+  Task,
+  TaskDraftInput,
+  TaskFromNoteInput,
+  TaskSubtaskInput,
+  TaskDeleteParams,
+  TaskInput,
+} from '@/types'
 import { invoke } from '@/lib/ipc'
 
 interface TasksState {
@@ -14,7 +21,10 @@ interface TasksState {
   createFromNote: (input: TaskFromNoteInput) => Promise<Task>
   /** v1.10：子任务（source 跟随父任务，parentId 关联）。 */
   createSubtask: (input: TaskSubtaskInput) => Promise<Task>
-  remove: (id: string) => Promise<void>
+  /** v1.10.1：删任务，cascade=true 级联删子任务。 */
+  remove: (params: TaskDeleteParams) => Promise<void>
+  /** v1.10.1：子任务转根任务（清 parentId）。 */
+  promoteSubtask: (id: string) => Promise<void>
 }
 
 export const useTasksStore = create<TasksState>((set) => ({
@@ -59,8 +69,14 @@ export const useTasksStore = create<TasksState>((set) => ({
     return task
   },
 
-  remove: async (id) => {
-    await invoke<true>('task:delete', id)
+  remove: async (params) => {
+    await invoke<true>('task:delete', params)
+    const list = await invoke<Task[]>('task:list')
+    set({ tasks: list })
+  },
+
+  promoteSubtask: async (id) => {
+    await invoke<true>('task:promote_subtask', id)
     const list = await invoke<Task[]>('task:list')
     set({ tasks: list })
   },

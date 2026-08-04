@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from 'react'
-import { Check, Plus, CheckSquare, CaretDown, CaretRight } from '@/components/ui/icons'
+import { Check, Plus, CheckSquare, CaretDown, CaretRight, ArrowRight, Pencil } from '@/components/ui/icons'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
@@ -36,13 +36,40 @@ const PRIORITY_STYLE: Record<TaskPriority, string> = {
 type Filter = 'all' | TaskStatus
 
 export function TasksPage() {
-  const { tasks, refresh, upsert, remove, createSubtask } = useTasksStore()
+  const { tasks, refresh, upsert, remove, createSubtask, promoteSubtask } = useTasksStore()
   const [filter, setFilter] = useState<Filter>('all')
   const [editingId, setEditingId] = useState<string | null>(null)
 
   useEffect(() => {
     refresh()
   }, [refresh])
+
+  // v1.10.1 A1：删根任务，有子任务时 confirm 级联删
+  const handleDeleteRoot = (task: Task, subCount: number) => {
+    if (subCount > 0) {
+      if (!confirm(`删除「${task.title}」及其 ${subCount} 个子任务？不可恢复。`)) return
+      remove({ id: task.id, cascade: true })
+    } else {
+      remove({ id: task.id })
+    }
+  }
+
+  // v1.10.1 A4：子任务勾选后检查是否全部完成 → 提示完成父任务（不强制）
+  const handleSubtaskToggle = (parent: Task, sub: Task, subs: Task[]) => {
+    const nextStatus = sub.status === 'done' ? 'todo' : 'done'
+    upsert({ id: sub.id, title: sub.title, status: nextStatus })
+    // 若切到 done 且父任务未完成，检查是否所有子任务都将完成
+    if (nextStatus === 'done' && parent.status !== 'done') {
+      const allDoneAfter = subs.every((s) => s.id === sub.id || s.status === 'done')
+      if (allDoneAfter) {
+        setTimeout(() => {
+          if (confirm(`所有子任务已完成，是否完成父任务「${parent.title}」？`)) {
+            upsert({ id: parent.id, title: parent.title, status: 'done' })
+          }
+        }, 100) // 延迟让 upsert 先落库
+      }
+    }
+  }
 
   // v1.10：数据分组——根任务 + 子任务按父 id 索引（数据量小，前端 reduce）
   const subtasksByParent = useMemo(() => {
@@ -118,12 +145,14 @@ export function TasksPage() {
               onToggleDone={() =>
                 upsert({ id: t.id, title: t.title, status: t.status === 'done' ? 'todo' : 'done' })
               }
-              onDelete={() => remove(t.id)}
+              onDelete={() => handleDeleteRoot(t, subtasksByParent.get(t.id)?.length ?? 0)}
               onAddSubtask={(title) => createSubtask({ parentId: t.id, title })}
               onToggleSubtaskDone={(sub) =>
-                upsert({ id: sub.id, title: sub.title, status: sub.status === 'done' ? 'todo' : 'done' })
+                handleSubtaskToggle(t, sub, subtasksByParent.get(t.id) ?? EMPTY_TASKS)
               }
-              onDeleteSubtask={(sub) => remove(sub.id)}
+              onDeleteSubtask={(sub) => remove({ id: sub.id })}
+              onPromoteSubtask={(sub) => promoteSubtask(sub.id)}
+              onEditSubtask={(sub, title) => upsert({ id: sub.id, title })}
             />
           ))}
         </div>
@@ -182,6 +211,8 @@ function TaskCard({
   onAddSubtask,
   onToggleSubtaskDone,
   onDeleteSubtask,
+  onPromoteSubtask,
+  onEditSubtask,
 }: {
   task: Task
   subtasks: Task[]
@@ -193,6 +224,8 @@ function TaskCard({
   onAddSubtask: (title: string) => void
   onToggleSubtaskDone: (sub: Task) => void
   onDeleteSubtask: (sub: Task) => void
+  onPromoteSubtask: (sub: Task) => void
+  onEditSubtask: (sub: Task, title: string) => void
 }) {
   // 编辑态字段
   const [title, setTitle] = useState(task.title)
@@ -204,6 +237,9 @@ function TaskCard({
   const [subOpen, setSubOpen] = useState(subtasks.length > 0)
   const [subInput, setSubInput] = useState('')
   const [addingSub, setAddingSub] = useState(false)
+  // v1.10.1 A2：子任务 inline 编辑态
+  const [editingSubId, setEditingSubId] = useState<string | null>(null)
+  const [subEditText, setSubEditText] = useState('')
 
   // 进入编辑态时同步字段（处理切到不同任务编辑）
   useEffect(() => {
@@ -341,6 +377,7 @@ function TaskCard({
               <div className="space-y-0.5 border-l border-border pl-3">
                 {subtasks.map((sub) => {
                   const subDone = sub.status === 'done'
+                  const isEditingSub = editingSubId === sub.id
                   return (
                     <div key={sub.id} className="group flex items-center gap-2 py-0.5">
                       <button
@@ -354,15 +391,68 @@ function TaskCard({
                       >
                         {subDone && <Check size={10} />}
                       </button>
-                      <span className={`flex-1 text-sm ${subDone ? 'line-through opacity-60' : ''}`}>
-                        {sub.title}
-                      </span>
-                      <button
-                        onClick={() => onDeleteSubtask(sub)}
-                        className="text-[10px] text-muted-foreground opacity-0 transition-opacity hover:text-destructive group-hover:opacity-100"
-                      >
-                        删除
-                      </button>
+                      {isEditingSub ? (
+                        // v1.10.1 A2：inline 编辑子任务标题
+                        <input
+                          autoFocus
+                          value={subEditText}
+                          onChange={(e) => setSubEditText(e.target.value)}
+                          className="flex-1 rounded border border-input bg-background px-1.5 py-0.5 text-sm"
+                          onKeyDown={(e) => {
+                            if (e.key === 'Enter' && subEditText.trim()) {
+                              onEditSubtask(sub, subEditText.trim())
+                              setEditingSubId(null)
+                            } else if (e.key === 'Escape') {
+                              setEditingSubId(null)
+                            }
+                          }}
+                          onBlur={() => {
+                            if (subEditText.trim() && subEditText.trim() !== sub.title) {
+                              onEditSubtask(sub, subEditText.trim())
+                            }
+                            setEditingSubId(null)
+                          }}
+                        />
+                      ) : (
+                        <span
+                          className={`flex-1 text-sm ${subDone ? 'line-through opacity-60' : ''}`}
+                          onDoubleClick={() => {
+                            setEditingSubId(sub.id)
+                            setSubEditText(sub.title)
+                          }}
+                        >
+                          {sub.title}
+                        </span>
+                      )}
+                      {/* v1.10.1 A2/A3：hover 显示 编辑/转根/删除 */}
+                      {!isEditingSub && (
+                        <div className="flex items-center gap-2 opacity-0 transition-opacity group-hover:opacity-100">
+                          <button
+                            onClick={() => {
+                              setEditingSubId(sub.id)
+                              setSubEditText(sub.title)
+                            }}
+                            title="编辑标题"
+                            className="text-muted-foreground hover:text-foreground"
+                          >
+                            <Pencil size={11} />
+                          </button>
+                          <button
+                            onClick={() => onPromoteSubtask(sub)}
+                            title="转为根任务"
+                            className="text-muted-foreground hover:text-foreground"
+                          >
+                            <ArrowRight size={11} />
+                          </button>
+                          <button
+                            onClick={() => onDeleteSubtask(sub)}
+                            title="删除"
+                            className="text-muted-foreground hover:text-destructive"
+                          >
+                            删除
+                          </button>
+                        </div>
+                      )}
                     </div>
                   )
                 })}

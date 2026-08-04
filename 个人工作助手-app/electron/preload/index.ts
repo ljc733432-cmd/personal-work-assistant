@@ -36,6 +36,7 @@ const ALLOWED_INVOKE = [
   'task:create_from_draft', // 草稿确认入库（M4，source=from_chat）
   'task:create_from_note',  // 笔记转任务（v1.9.1，source=from_note + sourceNotePath 溯源）
   'task:create_subtask',    // 子任务（v1.10，两级层级，parentId 关联父任务）
+  'task:promote_subtask',   // 子任务转根任务（v1.10.1，清 parentId）
   'reminder:list',          // 列提醒（M12.5 v1.2）
   'reminder:upsert',        // 新增/更新提醒
   'reminder:delete',        // 删除提醒
