@@ -76,7 +76,7 @@ CREATE TABLE IF NOT EXISTS tasks (
   source                   TEXT NOT NULL DEFAULT 'manual',
   source_conversation_id   TEXT,
   source_note_path         TEXT,                          -- v1.9.1：笔记转任务溯源（笔记 fileName，可空）
-  parent_id                TEXT,                          -- v1.10：父任务 id（两级层级，可空）
+  parent_id                TEXT,                          -- v1.10：父任务 id（v1.14 起无限层级，可空）
   followup_log             TEXT,
   completed_at             INTEGER,                       -- v1.8：完成时间戳（可空）
   tags                     TEXT NOT NULL DEFAULT '[]',     -- v1.11：任务标签（JSON 字符串）
@@ -152,7 +152,7 @@ export function getDb(): BetterSQLite3Database<typeof schema> {
     _raw.exec('ALTER TABLE tasks ADD COLUMN source_note_path TEXT')
     logInfo('[db] 迁移：tasks 已加列 source_note_path')
   }
-  // v1.10 迁移：tasks 加 parent_id 列（子任务两级层级）
+  // v1.10 迁移：tasks 加 parent_id 列（子任务层级，v1.14 起支持无限深度）
   if (!taskCols.some((c) => c.name === 'parent_id')) {
     _raw.exec('ALTER TABLE tasks ADD COLUMN parent_id TEXT')
     logInfo('[db] 迁移：tasks 已加列 parent_id')
@@ -164,17 +164,22 @@ export function getDb(): BetterSQLite3Database<typeof schema> {
   }
 
   // v1.10.8 数据修复：清除孤儿子任务（parent_id 指向已不存在的任务）。
+  // v1.14：无限层级下孤儿可能多层（删一层后暴露新的孤儿层），循环清理直到 0 行。
   // 成因：早期 task:delete 未强制级联删子任务，删根任务后子任务变孤儿残留。
   // 幂等——无孤儿时 DELETE 0 行，每次启动跑无副作用。
-  const orphanResult = _raw
-    .prepare(
-      `DELETE FROM tasks
-       WHERE parent_id IS NOT NULL
-         AND parent_id NOT IN (SELECT id FROM tasks)`,
-    )
-    .run()
-  if (orphanResult.changes > 0) {
-    logInfo(`[db] 数据修复：已清除 ${orphanResult.changes} 条孤儿子任务`)
+  const orphanStmt = _raw.prepare(
+    `DELETE FROM tasks
+     WHERE parent_id IS NOT NULL
+       AND parent_id NOT IN (SELECT id FROM tasks)`,
+  )
+  let totalOrphans = 0
+  for (;;) {
+    const r = orphanStmt.run()
+    if (r.changes === 0) break
+    totalOrphans += r.changes
+  }
+  if (totalOrphans > 0) {
+    logInfo(`[db] 数据修复：已清除 ${totalOrphans} 条孤儿子任务`)
   }
 
   _db = drizzle(_raw, { schema })

@@ -115,7 +115,7 @@ export interface Task {
   source: TaskSource
   sourceConversationId: string | null // M4 溯源用
   sourceNotePath: string | null // v1.9.1 笔记转任务溯源（笔记 fileName，可空）
-  parentId: string | null // v1.10 父任务 id（两级层级，null=根任务）
+  parentId: string | null // v1.10 父任务 id（v1.14 起无限层级，null=根任务）
   followupLog: string | null // M6 跟进日志
   completedAt: number | null // v1.8：完成时间戳，status→done 时写，null=未完成
   tags: string[] // v1.11：任务标签（JSON 字符串存库，rowToTask 解析）

@@ -57,7 +57,7 @@ Provider 之上的语义化快捷分组（ADR-022）。`{id, name, providerId}`�
 - `priority`：`low` / `medium` / `high`。
 - `source`：`manual`（手动建）/ `from_chat`（AI 抽取）/ `from_note`（v1.9.1 笔记转任务）。
 - `sourceNotePath`（v1.9.1）：笔记转任务溯源，存笔记 fileName（笔记库内稳定）。服务端从 noteId 解析填充，不信任前端传路径。
-- `parentId`（v1.10）：父任务 id，两级层级。null=根任务，非空=子任务。子任务 source 跟随父任务。不支持子任务的子任务（两级限制，UI 不给入口）。
+- `parentId`（v1.10，v1.14 起无限层级）：父任务 id。null=根任务，非空=子任务。任意深度嵌套（根→子→孙→...）。子任务 source 跟随父任务。v1.14 前 UI 限制两级，现已放开。
 - **孤儿子任务（Orphan Subtask，v1.10.8 数据完整性）**：parent_id 指向已删除任务的子任务。成因：删根任务时未级联删子任务。危害：任务页因父不存在不显示孤儿，但概览/看板统计全量时仍计入，表现为「删了还在」。防护：① `task:delete` 服务端总是先删 parent_id 指向自己的子任务（不依赖 cascade 参数，cascade 只用于前端确认框）；② `db/index.ts` getDb() 启动幂等 `DELETE WHERE parent_id NOT IN (SELECT id)` 清存量孤儿。
 
 ### **任务抽取草稿（Extraction Draft）**
@@ -86,6 +86,15 @@ Task 字段，追加式文本，记录每次 AI 跟进时用户的回复摘要�
   - **与 Note tags 的区别**：Note 的 tags 存 .md frontmatter（不入库），Task Tag 存 SQL 列。两者独立不互通。
   - **统一 accent 蓝**：标签徽标用 `bg-accent/10 text-accent`（不做颜色自定义，避免色彩泛滥）。
   - **不要叫**："分类/分组"——分类是 Project（未做，②），标签是自由文本横向归类；"目录"——那是文件夹。
+
+### **Task Project（任务项目/分组，v1.13）**
+任务的纵向归属分组（一个任务属于一个项目/领域，如「工作」「个人」「学习」）。
+- **与 Tag 的分工**：Tag 是横向自由分类（多对多，`string[]`，无生命周期）；Project 是纵向归属（一对一，单个 id，有 id/name 结构可改名）。互补不冲突——一个任务可同时有「工作」项目 +「紧急」标签。
+- **数据结构**：tasks 加 `projectId` 列（TEXT 可空，null=未分类）。存**稳定 id**而非项目名——项目改名后已关联任务仍指向同一项目（id 是锚点）。
+- **项目字典（projectDict）**：`{id, name}[]` 存 settings KV `tasks.projectDict`。与 tagDict（扁平 `string[]`）的区别：项目有 id+name 结构（支持改名），标签无独立生命周期。
+- **先 KV 后建表**：当前走 KV（项目只有名字，零新表）。未来需要颜色/排序/归档/独立管理页时迁移到 projects 表（照搬 tags 演进路径）。
+- **统一 accent 蓝 + # 前缀**：项目徽标 `# 项目名`（前缀 # 与标签纯文字区分）。
+- **不要叫**："标签/分类"——标签是 Tag（横向多对多），项目是纵向归属；"目录"——那是文件夹。
 - **不要叫**："排序/分类"——智能分组特指按维度分区块渲染；"看板"——那是 Dashboard 历史趋势页。
 
 ---
@@ -366,4 +375,4 @@ PRD §7 验收优先级。P0 必做 = v1 完成；P1 可选。
 | 笔记 AI / 智能笔记 | **NoteAiAssist**（v1.9 笔记页 4 个 AI 操作，区别于 create_note FC 工具） |
 | finishTime / doneAt | **completedAt**（v1.8 任务完成时间戳，与 status='done' 语义对齐） |
 | 排序 / 分类 / 看板 | **智能分组展示（Smart Grouping）**（v1.10.8 任务页按维度自动分区块） |
-| 分类 / 目录 | **Task Tag（任务标签）**（v1.11 跨状态横向归类，自由文本）；「项目分类」是未做的 Project（②） |
+| 分类 / 目录 | **Task Tag（任务标签）**（v1.11 横向多对多）/ **Task Project**（v1.13 纵向归属，一对一） |

@@ -271,7 +271,7 @@ export function TasksPage() {
           <div className="relative animate-fade-up">
             <h1 className="font-display text-2xl font-semibold tracking-tight">任务</h1>
             <p className="mt-1 text-sm text-muted-foreground">
-              手动管理待办。支持子任务（两级）、来源溯源、AI 抽取与跟进。
+              手动管理待办。支持无限层级子任务、来源溯源、AI 抽取与跟进。
             </p>
           </div>
         </header>
@@ -373,6 +373,8 @@ export function TasksPage() {
         task={t}
         subtasks={subtasksByParent.get(t.id) ?? EMPTY_TASKS}
         allRootTasks={rootTasks}
+        allTasks={tasks}
+        subtasksByParent={subtasksByParent}
         tagDict={tagDict}
         editing={editingId === t.id}
         onEdit={() => setEditingId(editingId === t.id ? null : t.id)}
@@ -384,7 +386,7 @@ export function TasksPage() {
           upsert({ id: t.id, title: t.title, status: t.status === 'done' ? 'todo' : 'done' })
         }
         onDelete={() => handleDeleteRoot(t, subtasksByParent.get(t.id)?.length ?? 0)}
-        onAddSubtask={(title) => createSubtask({ parentId: t.id, title })}
+        onAddSubtask={(parentId, title) => createSubtask({ parentId, title })}
         onToggleSubtaskDone={(sub) =>
           handleSubtaskToggle(t, sub, subtasksByParent.get(t.id) ?? EMPTY_TASKS)
         }
@@ -589,11 +591,179 @@ function TagEditor({
   )
 }
 
+// ---------- v1.14：递归任务节点（支持无限层级）----------
+// 渲染单个子任务 + 它的后代（递归）。缩进 + 左竖线表达层级。
+// 每个节点都有：勾选/inline编辑标题/加子任务/转根/删除。
+interface TaskNodeProps {
+  task: Task
+  depth: number
+  subtasksByParent: Map<string, Task[]>
+  onToggleDone: (sub: Task) => void
+  onEditTitle: (sub: Task, title: string) => void
+  onAddSubtask: (parentId: string, title: string) => void
+  onPromote: (sub: Task) => void
+  onDelete: (sub: Task) => void
+}
+function TaskNode({
+  task,
+  depth,
+  subtasksByParent,
+  onToggleDone,
+  onEditTitle,
+  onAddSubtask,
+  onPromote,
+  onDelete,
+}: TaskNodeProps) {
+  const subs = subtasksByParent.get(task.id) ?? EMPTY_TASKS
+  const [editing, setEditing] = useState(false)
+  const [editText, setEditText] = useState(task.title)
+  const [open, setOpen] = useState(subs.length > 0) // 有子任务默认展开
+  const [adding, setAdding] = useState(false)
+  const [addInput, setAddInput] = useState('')
+
+  const done = task.status === 'done'
+  return (
+    <div className="space-y-0.5">
+      <div
+        className="group flex items-center gap-2 py-0.5"
+        style={{ paddingLeft: `${depth * 16}px` }}
+      >
+        <button
+          onClick={() => onToggleDone(task)}
+          title={done ? '标记为待办' : '标记完成'}
+          className={`flex h-4 w-4 flex-shrink-0 items-center justify-center rounded border-2 transition-colors ${
+            done
+              ? 'border-success bg-success text-primary-foreground'
+              : 'border-muted-foreground/40 hover:border-primary'
+          }`}
+        >
+          {done && <Check size={10} />}
+        </button>
+        {editing ? (
+          <input
+            autoFocus
+            value={editText}
+            onChange={(e) => setEditText(e.target.value)}
+            className="flex-1 rounded border border-input bg-background px-1.5 py-0.5 text-sm"
+            onKeyDown={(e) => {
+              if (e.key === 'Enter' && editText.trim()) {
+                onEditTitle(task, editText.trim())
+                setEditing(false)
+              } else if (e.key === 'Escape') setEditing(false)
+            }}
+            onBlur={() => {
+              if (editText.trim() && editText.trim() !== task.title) onEditTitle(task, editText.trim())
+              setEditing(false)
+            }}
+          />
+        ) : (
+          <span
+            className={`flex-1 text-sm ${done ? 'line-through opacity-60' : ''}`}
+            onDoubleClick={() => {
+              setEditing(true)
+              setEditText(task.title)
+            }}
+          >
+            {task.title}
+          </span>
+        )}
+        {!editing && (
+          <div className="flex items-center gap-2 opacity-0 transition-opacity group-hover:opacity-100">
+            <button
+              onClick={() => { setEditing(true); setEditText(task.title) }}
+              title="编辑标题"
+              className="text-muted-foreground hover:text-foreground"
+            >
+              <Pencil size={11} />
+            </button>
+            <button
+              onClick={() => onPromote(task)}
+              title="转为根任务"
+              className="text-muted-foreground hover:text-foreground"
+            >
+              <ArrowRight size={11} />
+            </button>
+            <button
+              onClick={() => onDelete(task)}
+              title="删除"
+              className="text-muted-foreground hover:text-destructive"
+            >
+              删除
+            </button>
+          </div>
+        )}
+      </div>
+      {/* 子任务区（递归）*/}
+      {subs.length > 0 && (
+        <div className="border-l border-border" style={{ marginLeft: `${depth * 16 + 8}px` }}>
+          <button
+            onClick={() => setOpen((v) => !v)}
+            className="flex items-center gap-1 py-0.5 pl-2 text-[11px] text-muted-foreground transition-colors hover:text-foreground"
+          >
+            {open ? <CaretDown size={11} /> : <CaretRight size={11} />}
+            <span>子任务（{subs.length}）</span>
+          </button>
+          {open && (
+            <div className="space-y-0.5 pl-2">
+              {subs.map((sub) => (
+                <TaskNode
+                  key={sub.id}
+                  task={sub}
+                  depth={depth + 1}
+                  subtasksByParent={subtasksByParent}
+                  onToggleDone={onToggleDone}
+                  onEditTitle={onEditTitle}
+                  onAddSubtask={onAddSubtask}
+                  onPromote={onPromote}
+                  onDelete={onDelete}
+                />
+              ))}
+            </div>
+          )}
+        </div>
+      )}
+      {/* 添加子任务（每个节点都有入口）*/}
+      <div style={{ paddingLeft: `${depth * 16 + 16}px` }}>
+        {adding ? (
+          <Input
+            autoFocus
+            value={addInput}
+            onChange={(e) => setAddInput(e.target.value)}
+            placeholder="子任务标题，回车确认"
+            className="h-7 text-xs"
+            onKeyDown={(e) => {
+              if (e.key === 'Enter' && addInput.trim()) {
+                onAddSubtask(task.id, addInput.trim())
+                setAddInput('')
+                setAdding(false)
+                setOpen(true)
+              } else if (e.key === 'Escape') {
+                setAddInput('')
+                setAdding(false)
+              }
+            }}
+            onBlur={() => { if (!addInput.trim()) setAdding(false) }}
+          />
+        ) : (
+          <button
+            onClick={() => setAdding(true)}
+            className="flex items-center gap-1 py-0.5 text-[11px] text-muted-foreground transition-colors hover:text-foreground"
+          >
+            <Plus size={11} /> 添加子任务
+          </button>
+        )}
+      </div>
+    </div>
+  )
+}
+
 // ---------- 单个任务卡片（根任务，v1.10 含子任务区） ----------
 function TaskCard({
   task,
   subtasks,
   allRootTasks,
+  allTasks,
+  subtasksByParent,
   tagDict,
   editing,
   onEdit,
@@ -610,13 +780,15 @@ function TaskCard({
   task: Task
   subtasks: Task[]
   allRootTasks: Task[]
+  allTasks: Task[]
+  subtasksByParent: Map<string, Task[]>
   tagDict: string[]
   editing: boolean
   onEdit: () => void
   onSave: (input: TaskInput) => void
   onToggleDone: () => void
   onDelete: () => void
-  onAddSubtask: (title: string) => void
+  onAddSubtask: (parentId: string, title: string) => void
   onToggleSubtaskDone: (sub: Task) => void
   onDeleteSubtask: (sub: Task) => void
   onPromoteSubtask: (sub: Task) => void
@@ -656,6 +828,26 @@ function TaskCard({
     if (subtasks.length === 0) setSubOpen(false)
   }, [subtasks.length])
 
+  // v1.14：算自身所有后代 id（移动到下拉排除，防环路）。
+  // 必须在 if(editing) return 之前定义——编辑态用到了它，否则 TDZ 报错。
+  const descendantIds = useMemo(() => {
+    const set = new Set<string>()
+    let frontier = [task.id]
+    while (frontier.length > 0) {
+      const next: string[] = []
+      for (const id of frontier) {
+        for (const child of subtasksByParent.get(id) ?? []) {
+          if (!set.has(child.id)) {
+            set.add(child.id)
+            next.push(child.id)
+          }
+        }
+      }
+      frontier = next
+    }
+    return set
+  }, [task.id, subtasksByParent])
+
   if (editing) {
     return (
       <Card>
@@ -686,7 +878,7 @@ function TaskCard({
               <Input type="date" value={dueDate} onChange={(e) => setDueDate(e.target.value)} />
             </div>
           </div>
-          {/* v1.10.5：移动到（手动调整父子层级，解 AI 提炼不准的问题）*/}
+          {/* v1.14：移动到（无限层级，列全部任务，排除自身和后代防环路）*/}
           <div className="space-y-1.5">
             <Label>移动到</Label>
             <SelectInput
@@ -694,13 +886,13 @@ function TaskCard({
               onChange={(v) => onSetParent(task.id, v || null)}
               options={[
                 { value: '', label: '独立（根任务）' },
-                ...allRootTasks
-                  .filter((r) => r.id !== task.id)
+                ...allTasks
+                  .filter((r) => r.id !== task.id && !descendantIds.has(r.id))
                   .map((r) => ({ value: r.id, label: r.title })),
               ]}
             />
             <p className="text-[10px] text-muted-foreground">
-              选一个根任务作为父任务，本任务变为其子任务；选「独立」变回根任务
+              选一个任务作为父任务（支持任意层级）；选「独立」变回根任务。不能移到自己的子任务下
             </p>
           </div>
           {/* v1.11：标签编辑（候选来自字典 + 当前标签 + 输入新标签）*/}
@@ -788,104 +980,31 @@ function TaskCard({
           </div>
         </div>
 
-        {/* v1.10：子任务区（两级层级）*/}
-        <div className="space-y-1.5 border-t pt-2">
-          <button
-            onClick={() => setSubOpen((v) => !v)}
-            className="flex items-center gap-1 text-[11px] text-muted-foreground transition-colors hover:text-foreground"
-          >
-            {subOpen ? <CaretDown size={11} /> : <CaretRight size={11} />}
-            <span>子任务 {subtasks.length > 0 && `（${doneSubCount}/${subtasks.length}）`}</span>
-          </button>
-          {subOpen && (
-            <div className="space-y-1 pl-3">
-              {/* 子任务列表（缩进 + 左竖线表示层级）*/}
-              <div className="space-y-0.5 border-l border-border pl-3">
-                {subtasks.map((sub) => {
-                  const subDone = sub.status === 'done'
-                  const isEditingSub = editingSubId === sub.id
-                  return (
-                    <div key={sub.id} className="group flex items-center gap-2 py-0.5">
-                      <button
-                        onClick={() => onToggleSubtaskDone(sub)}
-                        title={subDone ? '标记为待办' : '标记完成'}
-                        className={`flex h-4 w-4 flex-shrink-0 items-center justify-center rounded border-2 transition-colors ${
-                          subDone
-                            ? 'border-success bg-success text-primary-foreground'
-                            : 'border-muted-foreground/40 hover:border-primary'
-                        }`}
-                      >
-                        {subDone && <Check size={10} />}
-                      </button>
-                      {isEditingSub ? (
-                        // v1.10.1 A2：inline 编辑子任务标题
-                        <input
-                          autoFocus
-                          value={subEditText}
-                          onChange={(e) => setSubEditText(e.target.value)}
-                          className="flex-1 rounded border border-input bg-background px-1.5 py-0.5 text-sm"
-                          onKeyDown={(e) => {
-                            if (e.key === 'Enter' && subEditText.trim()) {
-                              onEditSubtask(sub, subEditText.trim())
-                              setEditingSubId(null)
-                            } else if (e.key === 'Escape') {
-                              setEditingSubId(null)
-                            }
-                          }}
-                          onBlur={() => {
-                            if (subEditText.trim() && subEditText.trim() !== sub.title) {
-                              onEditSubtask(sub, subEditText.trim())
-                            }
-                            setEditingSubId(null)
-                          }}
-                        />
-                      ) : (
-                        <span
-                          className={`flex-1 text-sm ${subDone ? 'line-through opacity-60' : ''}`}
-                          onDoubleClick={() => {
-                            setEditingSubId(sub.id)
-                            setSubEditText(sub.title)
-                          }}
-                        >
-                          {sub.title}
-                        </span>
-                      )}
-                      {/* v1.10.1 A2/A3：hover 显示 编辑/转根/删除 */}
-                      {!isEditingSub && (
-                        <div className="flex items-center gap-2 opacity-0 transition-opacity group-hover:opacity-100">
-                          <button
-                            onClick={() => {
-                              setEditingSubId(sub.id)
-                              setSubEditText(sub.title)
-                            }}
-                            title="编辑标题"
-                            className="text-muted-foreground hover:text-foreground"
-                          >
-                            <Pencil size={11} />
-                          </button>
-                          <button
-                            onClick={() => onPromoteSubtask(sub)}
-                            title="转为根任务"
-                            className="text-muted-foreground hover:text-foreground"
-                          >
-                            <ArrowRight size={11} />
-                          </button>
-                          <button
-                            onClick={() => onDeleteSubtask(sub)}
-                            title="删除"
-                            className="text-muted-foreground hover:text-destructive"
-                          >
-                            删除
-                          </button>
-                        </div>
-                      )}
-                    </div>
-                  )
-                })}
-              </div>
-            </div>
+        {/* v1.14：子任务区（无限层级，递归 TaskNode 渲染）。根任务的直接子任务列表可折叠。*/}
+        <div className="space-y-1 border-t pt-2">
+          {subtasks.length > 0 && (
+            <button
+              onClick={() => setSubOpen((v) => !v)}
+              className="flex items-center gap-1 text-[11px] text-muted-foreground transition-colors hover:text-foreground"
+            >
+              {subOpen ? <CaretDown size={11} /> : <CaretRight size={11} />}
+              <span>子任务（{doneSubCount}/{subtasks.length}）</span>
+            </button>
           )}
-          {/* 添加子任务（v1.10.6：移出折叠区，始终可见——否则首次无子任务时折叠导致看不见入口）*/}
+          {subOpen && subtasks.map((sub) => (
+            <TaskNode
+              key={sub.id}
+              task={sub}
+              depth={0}
+              subtasksByParent={subtasksByParent}
+              onToggleDone={onToggleSubtaskDone}
+              onEditTitle={onEditSubtask}
+              onAddSubtask={onAddSubtask}
+              onPromote={onPromoteSubtask}
+              onDelete={onDeleteSubtask}
+            />
+          ))}
+          {/* 根任务的添加子任务入口（TaskNode 内部每个节点也各自有入口）*/}
           {addingSub ? (
             <Input
               autoFocus
@@ -895,10 +1014,9 @@ function TaskCard({
               className="h-7 text-xs"
               onKeyDown={(e) => {
                 if (e.key === 'Enter' && subInput.trim()) {
-                  onAddSubtask(subInput.trim())
+                  onAddSubtask(task.id, subInput.trim())
                   setSubInput('')
                   setAddingSub(false)
-                  setSubOpen(true) // 添加后展开，让用户看到新加的子任务
                 } else if (e.key === 'Escape') {
                   setSubInput('')
                   setAddingSub(false)

@@ -1,6 +1,4 @@
 import { useEffect, useState, useRef } from 'react'
-import { Transformer } from 'markmap-lib'
-import { Markmap } from 'markmap-view'
 import {
   Graph,
   Loader2,
@@ -15,6 +13,7 @@ import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { invoke } from '@/lib/ipc'
 import { BackHeader } from './ToolsPage'
+import { MindmapView } from '@/components/ui/MindmapView'
 import { useNotesStore } from '@/stores/notes'
 import { useTasksStore } from '@/stores/tasks'
 import { useNavigate } from '@/pages/overview/nav'
@@ -50,8 +49,6 @@ export function MindmapToolbox({ onBack }: { onBack: () => void }) {
   const [selectedTaskId, setSelectedTaskId] = useState('')
   // 渲染结果
   const [markdown, setMarkdown] = useState('')
-  const svgRef = useRef<SVGSVGElement>(null)
-  const mmRef = useRef<Markmap | null>(null)
 
   const { notes, refresh: refreshNotes } = useNotesStore()
   const { tasks, refresh: refreshTasks } = useTasksStore()
@@ -62,19 +59,6 @@ export function MindmapToolbox({ onBack }: { onBack: () => void }) {
     refreshNotes()
     refreshTasks()
   }, [refreshNotes, refreshTasks])
-
-  // markmap 渲染：markdown 变化时 transform + setData
-  useEffect(() => {
-    if (!markdown || !svgRef.current) return
-    const transformer = new Transformer()
-    const { root } = transformer.transform(markdown)
-    if (!mmRef.current) {
-      mmRef.current = new Markmap(svgRef.current, { zoom: true, pan: true, initialExpandLevel: 3 })
-    }
-    mmRef.current.setData(root).then(() => {
-      mmRef.current?.fit()
-    })
-  }, [markdown])
 
   // 历史思维导图笔记
   const history = notes
@@ -297,16 +281,8 @@ export function MindmapToolbox({ onBack }: { onBack: () => void }) {
             )}
           </div>
 
-          {/* 思维导图渲染（markmap SVG） */}
-          {markdown && (
-            <div className="rounded-md border bg-card p-3">
-              <div className="mb-2 flex items-center gap-1.5 text-xs font-medium text-muted-foreground">
-                <Graph size={13} weight="duotone" className="text-accent" />
-                思维导图预览（可拖拽缩放，点击节点折叠/展开）
-              </div>
-              <svg ref={svgRef} className="h-[400px] w-full" />
-            </div>
-          )}
+          {/* 思维导图渲染（公共 MindmapView 组件，key 强制重建，卸载即 destroy d3 事件） */}
+          {markdown && <MindmapView key={markdown} markdown={markdown} />}
 
           {/* 历史思维导图 */}
           <div className="space-y-3 rounded-md border bg-card p-5">

@@ -1,7 +1,7 @@
 import { ipcMain, BrowserWindow } from 'electron'
 import { randomUUID } from 'node:crypto'
 import path from 'node:path'
-import { eq, desc, and, gte, lte, sql } from 'drizzle-orm'
+import { eq, desc, and, gte, lte, sql, inArray } from 'drizzle-orm'
 import { getDb, dbHealthCheck } from '../services/db'
 import {
   providers,
@@ -750,11 +750,31 @@ function registerTaskHandlers() {
   ipcMain.handle('task:delete', (_, params: TaskDeleteParams): IpcResult<true> => {
     try {
       const db = getDb()
-      // v1.10.8：服务端总是级联删子任务（不再依赖 cascade 参数）。
-      // cascade 参数保留给前端做「是否弹确认框」用，但删除本身必须清理后代，
-      // 否则父任务删了子任务变孤儿残留数据库（曾出现孤儿导致概览/看板统计对不上）。
-      db.delete(tasks).where(eq(tasks.parentId, params.id)).run()
-      db.delete(tasks).where(eq(tasks.id, params.id)).run()
+      // v1.14：递归删所有后代（无限层级）。之前只删一级子任务，孙子变孤儿。
+      // 收集所有后代 id：从 params.id 出发，逐层查 parentId IN 当前层 的下一层，直到无更多。
+      const allRows = db.select({ id: tasks.id, parentId: tasks.parentId }).from(tasks).all()
+      const childrenOf = new Map<string, string[]>()
+      for (const r of allRows) {
+        if (r.parentId) {
+          const arr = childrenOf.get(r.parentId) ?? []
+          arr.push(r.id)
+          childrenOf.set(r.parentId, arr)
+        }
+      }
+      const toDelete: string[] = []
+      let frontier = [params.id]
+      while (frontier.length > 0) {
+        const next: string[] = []
+        for (const id of frontier) {
+          toDelete.push(id)
+          const children = childrenOf.get(id) ?? []
+          next.push(...children)
+        }
+        frontier = next
+      }
+      if (toDelete.length > 0) {
+        db.delete(tasks).where(inArray(tasks.id, toDelete)).run()
+      }
       return ok(true)
     } catch (e) {
       return err(String(e))
@@ -773,11 +793,10 @@ function registerTaskHandlers() {
   })
 
   // v1.10.5：手动移动任务到某父任务下（或移出变根任务）。
-  // 入参 { id, parentId }：parentId=null 变根任务；parentId=某根任务 id 变其子任务。
-  // 两级限制：只允许把根任务移到另一个根任务下。
-  // v1.10.7 语义修正：移动一个有子任务的根任务 A 到 B 下时，A 的子任务跟着搬到 B 下
-  //   （和 A 平级，都成 B 的直接子任务），而非变成独立根任务丢失归属。整组不散。
-  //   - 移出变根（parentId=null）时：A 的子任务保持原样（仍是 A 的子任务），只 A 自己变根。
+  // 入参 { id, parentId }：parentId=null 变根任务；parentId=某任务 id 变其子任务。
+  // v1.14：支持无限层级。移动 A 到 B 下时：
+  //   - 只改 A 的 parentId，不动 A 的后代（整棵子树跟着 A 移动，保持内部结构）
+  //   - 环路检测：B 不能是 A 自己，也不能是 A 的后代（否则 A→B→...→A 成环）
   ipcMain.handle(
     'task:set_parent',
     (_, params: { id: string; parentId: string | null }): IpcResult<true> => {
@@ -788,16 +807,39 @@ function registerTaskHandlers() {
           ? db.select().from(tasks).where(eq(tasks.id, params.parentId)).get()
           : null
         if (params.parentId && !target) return err('目标父任务不存在')
-        if (target?.parentId) return err('目标已是子任务，不能再嵌套（仅支持两级）')
-        const now = Math.floor(Date.now() / 1000)
+        // v1.14 环路检测：parentId 不能是 id 的后代。递归收集 id 的所有后代 id。
         if (params.parentId) {
-          // 移到某父下：A 的子任务也改成指向新父（平级搬到 B 下，整组不散）
-          db.update(tasks)
-            .set({ parentId: params.parentId, updatedAt: now })
-            .where(eq(tasks.parentId, params.id))
-            .run()
+          const descendantIds = new Set<string>()
+          let frontier = [params.id]
+          while (frontier.length > 0) {
+            const rows = db
+              .select({ id: tasks.id })
+              .from(tasks)
+              .all()
+              .filter((r) => {
+                // 查 parentId IN frontier（drizzle in 子句简化为全量 filter，任务量小）
+                const row = db
+                  .select()
+                  .from(tasks)
+                  .where(eq(tasks.id, r.id))
+                  .get()
+                return row && frontier.includes(row.parentId ?? '')
+              })
+            const next: string[] = []
+            for (const r of rows) {
+              if (!descendantIds.has(r.id)) {
+                descendantIds.add(r.id)
+                next.push(r.id)
+              }
+            }
+            frontier = next
+          }
+          if (descendantIds.has(params.parentId)) {
+            return err('不能把任务移到它自己的子任务下面（会形成循环）')
+          }
         }
-        // 移动本任务（移出变根时只改自己，子任务保持原 parentId 不动）
+        const now = Math.floor(Date.now() / 1000)
+        // v1.14：只移动本任务，不动后代（整棵子树保持内部结构跟着移动）
         db.update(tasks)
           .set({ parentId: params.parentId, updatedAt: now })
           .where(eq(tasks.id, params.id))
@@ -882,9 +924,9 @@ function registerTaskHandlers() {
     }
   })
 
-  // v1.10：子任务（两级层级，PRD 用户需求）。与 create_from_draft/note 平行。
+  // v1.10：子任务（v1.14 起支持无限层级）。与 create_from_draft/note 平行。
   // source 跟随父任务（服务端查父任务后填，保持溯源一致），status 恒 todo，parentId 填入参。
-  // 两级限制：UI 不给子任务再加子任务的入口（但后端不强制——数据层允许，前端约束）。
+  // v1.14：任意任务都可作为父任务（不限根任务），UI 每个节点都有「添加子任务」入口。
   ipcMain.handle('task:create_subtask', (_, input: TaskSubtaskInput): IpcResult<Task> => {
     try {
       const db = getDb()
