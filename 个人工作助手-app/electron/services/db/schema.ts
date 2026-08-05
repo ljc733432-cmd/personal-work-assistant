@@ -98,7 +98,7 @@ export const tasks = sqliteTable('tasks', {
   sourceConversationId: text('source_conversation_id'), // M4 溯源用，可空
   // v1.9.1：笔记转任务溯源（PRD §15.6），存笔记 fileName（笔记库内唯一稳定）。可空。
   sourceNotePath: text('source_note_path'),
-  // v1.10：父任务 id（两级层级）。null=根任务；非空=子任务。不支持子任务的子任务（两级限制）。
+  // v1.10：父任务 id（v1.14 起支持无限层级）。null=根任务；非空=子任务。任意深度嵌套。
   parentId: text('parent_id'),
   followupLog: text('followup_log'), // M6 跟进日志，可空
   // v1.8：完成时间戳（精确「今日完成」用于日报）。status→done 时写，切回非 done 清空。

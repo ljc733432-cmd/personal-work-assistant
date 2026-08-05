@@ -11,9 +11,12 @@ import {
   CheckCircle2,
   AlertCircle,
   CheckSquare,
+  CaretDown,
+  CaretRight,
 } from '@/components/ui/icons'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
+import { MindmapView } from '@/components/ui/MindmapView'
 import { Textarea } from '@/components/ui/textarea'
 import { Markdown } from '@/components/Markdown'
 import { EmptyState } from '@/components/ui/EmptyState'
@@ -275,7 +278,7 @@ export function NotesPage() {
                   className="min-h-0 flex-1 resize-none border-transparent bg-transparent font-mono text-sm focus-visible:ring-0"
                 />
               ) : (
-                <div className="mx-auto flex-1 overflow-y-auto max-w-3xl">
+                <div className="mx-auto flex-1 overflow-y-auto max-w-5xl px-2">
                   {/* v1.9.1 笔记待办转任务面板（PRD §15.2②）：解析 - [ ] 未勾选项，提供转任务按钮 */}
                   <NoteTodosPanel
                     content={active.content}
@@ -285,8 +288,17 @@ export function NotesPage() {
                     onConvert={createFromNote}
                     onConvertSub={createSubtask}
                   />
+                  {/* v1.12：思维导图笔记（tag 含「思维导图」）额外渲染 markmap 预览。
+                      限宽 max-w-3xl 居中，避免太宽难看；正文区用更宽的 max-w-4xl。 */}
+                  {active.tags.includes('思维导图') && active.content.trim() && (
+                    <div className="mx-auto mb-4 max-w-3xl">
+                      <MindmapView key={active.content} markdown={active.content} />
+                    </div>
+                  )}
                   {active.content.trim() ? (
-                    <Markdown content={active.content} />
+                    <div className="mx-auto max-w-4xl">
+                      <Markdown content={active.content} />
+                    </div>
                   ) : (
                     <div className="py-12 text-center text-sm text-muted-foreground">
                       这条笔记是空的。点「编辑」开始写。
@@ -571,9 +583,15 @@ function NoteTodosPanel({
 }) {
   const [converting, setConverting] = useState<string | null>(null) // 正在转的 key（title 或 title>subtitle）
   const [error, setError] = useState<string | null>(null)
+  // v1.12：面板默认折叠（避免待办多时挤占视野），用户需要才展开
+  const [expanded, setExpanded] = useState(false)
 
   const tree = buildTodoTree(parseTaskLines(content).filter((l) => !l.checked && l.text))
   const totalCount = tree.reduce((sum, n) => sum + 1 + n.children.length, 0)
+  // v1.12：限制显示数量，超 20 条默认折叠剩余（避免一次渲染太多卡顿）
+  const MAX_VISIBLE = 20
+  const visibleTree = expanded ? tree : tree.slice(0, MAX_VISIBLE)
+  const hiddenCount = tree.length - visibleTree.length
 
   // 根待办是否已转（source=from_note + sourceNotePath + title）
   const findRootTask = (title: string) =>
@@ -616,13 +634,18 @@ function NoteTodosPanel({
 
   return (
     <div className="mb-4 rounded-md border bg-surface-2 p-3">
-      <div className="mb-2 flex items-center gap-1.5 text-xs font-medium text-muted-foreground">
+      <button
+        onClick={() => setExpanded((v) => !v)}
+        className="mb-1 flex w-full items-center gap-1.5 text-xs font-medium text-muted-foreground transition-colors hover:text-foreground"
+      >
+        {expanded ? <CaretDown size={13} /> : <CaretRight size={13} />}
         <CheckSquare size={13} />
         <span>笔记待办（{totalCount}）</span>
         <span className="text-[10px] text-muted-foreground/70">点「转任务」加入任务列表（缩进=子任务）</span>
-      </div>
-      <ul className="space-y-1">
-        {tree.map((node, i) => {
+      </button>
+      {expanded && (
+        <ul className="space-y-1">
+          {visibleTree.map((node, i) => {
           const rootTask = findRootTask(node.line.text)
           const rootConverted = !!rootTask
           return (
@@ -689,7 +712,13 @@ function NoteTodosPanel({
             </li>
           )
         })}
-      </ul>
+          {hiddenCount > 0 && (
+            <li className="py-1 text-center text-[11px] text-muted-foreground">
+              还有 {hiddenCount} 条待办，转完上面的再展开查看
+            </li>
+          )}
+        </ul>
+      )}
       {error && <p className="mt-2 text-[10px] text-destructive">转任务失败：{error}</p>}
     </div>
   )

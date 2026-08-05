@@ -107,33 +107,55 @@ export async function assistNote(
   const { client, model } = createClientForProvider(providerId)
 
   const systemPrompt = SYSTEM_PROMPTS[op]
+  // v1.12 修：笔记内容超长时截断（约 6000 字），避免撑爆上下文导致输出空间不足
+  // 触发 finish_reason=length 连开头都生成不出来（思维导图笔记可能很长）。
+  const MAX_CONTENT_CHARS = 6000
+  const trimmedContent =
+    content.length > MAX_CONTENT_CHARS
+      ? content.slice(0, MAX_CONTENT_CHARS) + '\n\n（笔记内容过长，已截断）'
+      : content
   // questions 模式：有追问就把问题拼进 user 消息；其他模式直接传笔记内容
   const userContent =
     op === 'questions' && options.question?.trim()
-      ? `笔记内容：\n\n${content}\n\n我的问题：${options.question.trim()}`
-      : content
+      ? `笔记内容：\n\n${trimmedContent}\n\n我的问题：${options.question.trim()}`
+      : trimmedContent
 
-  const res = await client.chat.completions.create(
-    {
-      model,
-      messages: [
-        { role: 'system', content: systemPrompt },
-        { role: 'user', content: userContent },
-      ],
-      stream: false,
-      temperature: 0.3, // 与 reportGenerator 一致，通顺但不胡编
-      max_tokens: 2000, // 笔记操作输出比报告短
-    },
-    { timeout: 30000, signal: options.signal },
-  )
+  // v1.12：max_tokens 按操作区分。flash 类小模型上限低，todos/continue 给 2000 更稳妥
+  // （之前 3000 触发 deepseek-v4-flash 的 length 截断返回空内容）
+  const maxTokens = op === 'todos' || op === 'continue' ? 2000 : 1500
 
-  const choice = res.choices?.[0]
-  const result = choice?.message?.content ?? ''
-  const finishReason = choice?.finish_reason ?? 'unknown'
+  // v1.12：空内容重试策略——length/content_filter 不重试（重试也是空，浪费 API），
+  // 仅 stop（偶发空）时重试一次。DeepSeek flash 在结构化输出任务上易 length，不重试。
+  let result = ''
+  let finishReason = 'unknown'
+  for (let attempt = 0; attempt < 2; attempt++) {
+    const res = await client.chat.completions.create(
+      {
+        model,
+        messages: [
+          { role: 'system', content: systemPrompt },
+          { role: 'user', content: userContent },
+        ],
+        stream: false,
+        temperature: 0.3, // 与 reportGenerator 一致，通顺但不胡编
+        max_tokens: maxTokens,
+      },
+      { timeout: 30000, signal: options.signal },
+    )
+    const choice = res.choices?.[0]
+    result = choice?.message?.content ?? ''
+    finishReason = choice?.finish_reason ?? 'unknown'
+    if (result.trim()) break // 有内容就停
+    logInfo(`[noteAssistant] 空内容 attempt=${attempt + 1}：op=${op} finish_reason=${finishReason} model=${model}`)
+    // length（输出截断）和 content_filter（审核）重试无效，直接停
+    if (finishReason === 'length' || finishReason === 'content_filter') break
+  }
 
-  // 诊断日志：空 content 时记录 finish_reason，便于排查（length=被截断/content_filter=审核/stop=正常结束却空）
+  // 空内容兜底：按 finish_reason 给针对性提示
   if (!result.trim()) {
-    logInfo(`[noteAssistant] 空内容：op=${op} finish_reason=${finishReason} model=${model}`)
+    if (finishReason === 'length') {
+      return `（模型输出被长度限制截断（${model} 可能是 flash 类小模型，输出上限低）。建议在设置页换一个更强的模型，如 glm-4.5 或 deepseek-chat）`
+    }
     return `（模型未返回内容。原因：${finishReason}。请稍后重试，或换一个操作）`
   }
 
