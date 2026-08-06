@@ -37,12 +37,14 @@ export interface ChatMessage {
   content: string
   streaming?: boolean // 该条正在流式接收中
   toolCalls?: ToolCallInfo[] // 本轮发起的工具调用（独立展示，不混入 content）
+  /** v1.17 对话发图：用户消息可带图片附件（dataUrl，前端暂存，发送时带上）。 */
+  attachments?: { name: string; dataUrl: string }[]
 }
 
 export interface ChatSendParams {
   reqId: string
   providerId: string
-  messages: { role: ChatRole; content: string }[]
+  messages: { role: ChatRole; content: string; attachments?: { name: string; dataUrl: string }[] }[]
   enableTools?: boolean
   conversationId: string // M2：本轮归属会话，主进程据此落库
 }

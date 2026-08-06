@@ -51,4 +51,6 @@ export {
   TrendDownIcon as TrendDown, // 趋势下降（v1.10.8 看板趋势箭头）
   MinusIcon as Minus, // 趋势持平（v1.10.8 看板趋势箭头）
   GraphIcon as Graph, // 思维导图（v1.12 网络/分支结构语义）
+  TextAlignLeftIcon as TextAlignLeft, // 大纲（v1.15 笔记大纲侧栏）
+  ImageSquareIcon as ImageSquare, // 图片（v1.17 笔记/对话贴图）
 } from '@phosphor-icons/react'

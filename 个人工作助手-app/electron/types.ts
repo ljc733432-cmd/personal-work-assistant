@@ -31,10 +31,18 @@ export interface ProviderInput {
 // ---------- 对话 ----------
 export type ChatRole = 'system' | 'user' | 'assistant' | 'tool'
 
+/** v1.17 对话发图：OpenAI 多模态 content 的单部分。视觉模型专用。 */
+export type ChatContentPart =
+  | { type: 'text'; text: string }
+  | { type: 'image_url'; image_url: { url: string } }
+
 export interface ChatMessage {
   role: ChatRole
   content: string
   toolCalls?: unknown // FC 调用记录
+  /** v1.17 对话发图：用户消息可带图片附件（dataUrl）。主进程按模型能力分流：
+   *  视觉模型 → 多模态 image_url；纯文本模型 → OCR 转文字拼进 content。 */
+  attachments?: { name: string; dataUrl: string }[]
 }
 
 export interface ChatSendParams {

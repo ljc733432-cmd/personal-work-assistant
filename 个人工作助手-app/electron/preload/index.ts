@@ -51,6 +51,7 @@ const ALLOWED_INVOKE = [
   'note:search',            // 全文搜笔记
   'note:getDir',            // 读笔记库目录
   'note:setDir',            // 设笔记库目录
+  'note:save_image',        // v1.17 笔记贴图：保存图片到笔记库 images/，返回 markdown 引用路径
   'convert:targets',        // 查转换支持的目标格式（M12.9 v1.2）
   'convert:run',            // 执行文档转换
   'convert:pickFile',       // 选输入文件（dialog）

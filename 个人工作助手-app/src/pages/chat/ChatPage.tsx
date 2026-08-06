@@ -1,5 +1,5 @@
-import { useEffect, useRef, useState } from 'react'
-import { Sparkles, MessageSquare, User, Bot, Wrench, Loader2 } from '@/components/ui/icons'
+import { useEffect, useRef, useState, type ClipboardEvent, type ChangeEvent } from 'react'
+import { Sparkles, MessageSquare, User, Bot, Wrench, Loader2, ImageSquare, X } from '@/components/ui/icons'
 import { Button } from '@/components/ui/button'
 import { Textarea } from '@/components/ui/textarea'
 import { Markdown } from '@/components/Markdown'
@@ -22,12 +22,15 @@ const EMPTY_MESSAGES: ChatMessage[] = []
 const EMPTY_DRAFTS: TaskDraft[] = []
 
 export function ChatPage() {
-  const { providers, refresh } = useProvidersStore()
+  const { providers, refresh, initialized } = useProvidersStore()
   const [providerId, setProviderId] = useState<string>('')
   const [input, setInput] = useState('')
   const [enableTools, setEnableTools] = useState(true) // 默认开 FC，验证 TV-1
   const [confirmReq, setConfirmReq] = useState<ConfirmRequest | null>(null)
   const scrollRef = useRef<HTMLDivElement>(null)
+  // v1.17 对话发图：待发送的图片附件（粘贴/上传），发送时带进 user 消息
+  const [pendingImages, setPendingImages] = useState<{ name: string; dataUrl: string }[]>([])
+  const chatImgInputRef = useRef<HTMLInputElement>(null)
 
   // M4-Step7：自动抽取配置（ref，不触发重渲染，供 offDone 闭包读）。
   // 设置页改了需重开生效（MVP，不做实时同步——避免每次 done 都 IPC 读）。
@@ -175,7 +178,16 @@ export function ChatPage() {
   }
 
   const handleSend = async () => {
-    if (!input.trim() || !providerId || streaming) return
+    if (!input.trim() || streaming) return
+    // v1.16.1：provider 未就绪时给明确提示（而非静默 return，避免用户按 Enter 无反应）
+    if (!providerId) {
+      setMeta(activeId ?? '', {
+        error: initialized
+          ? '尚未配置模型，请先到设置页添加模型'
+          : '模型配置加载中，请稍候片刻再发送',
+      })
+      return
+    }
     if (!activeId) {
       setMeta(activeId ?? '', { error: '会话未就绪，请稍候' })
       return
@@ -184,13 +196,20 @@ export function ChatPage() {
     // 清该会话的 error + truncatedNotice + 置 streaming（per-conversation，Step6）
     setMeta(convId, { error: null, streaming: true, firstTokenMs: null, truncatedNotice: null })
 
-    const userMsg: ChatMessage = { id: genId(), role: 'user', content: input.trim() }
+    const userMsg: ChatMessage = {
+      id: genId(),
+      role: 'user',
+      content: input.trim(),
+      // v1.17 对话发图：带上待发送的图片附件
+      ...(pendingImages.length > 0 ? { attachments: pendingImages } : {}),
+    }
     const aiMsg: ChatMessage = { id: genId(), role: 'assistant', content: '', streaming: true }
     const history = [...messages, userMsg]
     // 乐观插入：user + 空 aiMsg（store 追加）
     appendMessage(convId, userMsg)
     appendMessage(convId, aiMsg)
     setInput('')
+    setPendingImages([]) // v1.17：发送后清空待发图片
 
     // ★ 关键：渲染层先生成 reqId，先订阅，再带 reqId 发起。
     // 旧版 reqId 在 invoke 返回后才知，会丢首字且无法取消。
@@ -272,7 +291,12 @@ export function ChatPage() {
         providerId,
         enableTools,
         conversationId: convId,
-        messages: history.map((m) => ({ role: m.role, content: m.content })),
+        messages: history.map((m) => ({
+          role: m.role,
+          content: m.content,
+          // v1.17 对话发图：带图片附件给主进程分流（视觉/OCR）
+          ...(m.attachments && m.attachments.length > 0 ? { attachments: m.attachments } : {}),
+        })),
       })
     } catch (e) {
       setMeta(convId, { error: String(e) })
@@ -286,6 +310,52 @@ export function ChatPage() {
     if (!rid) return
     // AbortController 在主进程，通过 send 触发取消
     send('chat:cancel', rid)
+  }
+
+  // v1.17 对话发图：粘贴/上传图片到待发送列表（不在正文插文本，单独预览）。
+  // 粘贴：拦截 clipboardData 里的图片项，转 dataUrl 加入 pendingImages。
+  const handlePaste = (e: ClipboardEvent<HTMLTextAreaElement>) => {
+    const items = e.clipboardData?.items
+    if (!items) return
+    for (const it of items) {
+      if (it.type.startsWith('image/')) {
+        const file = it.getAsFile()
+        if (file) {
+          const reader = new FileReader()
+          reader.onload = () => {
+            const dataUrl = reader.result
+            if (typeof dataUrl === 'string') {
+              setPendingImages((prev) => [
+                ...prev,
+                { name: file.name || `图片${prev.length + 1}`, dataUrl },
+              ])
+            }
+          }
+          reader.readAsDataURL(file)
+        }
+      }
+    }
+  }
+
+  // 上传按钮：选文件加入 pendingImages
+  const handlePickChatImage = (e: ChangeEvent<HTMLInputElement>) => {
+    const files = e.target.files
+    if (!files) return
+    Array.from(files).forEach((file) => {
+      const reader = new FileReader()
+      reader.onload = () => {
+        const dataUrl = reader.result
+        if (typeof dataUrl === 'string') {
+          setPendingImages((prev) => [...prev, { name: file.name, dataUrl }])
+        }
+      }
+      reader.readAsDataURL(file)
+    })
+    e.target.value = ''
+  }
+
+  const removePendingImage = (idx: number) => {
+    setPendingImages((prev) => prev.filter((_, i) => i !== idx))
   }
 
   // M4：抽取任务草稿核心逻辑（手动 ✨ 和自动都用）。
@@ -352,7 +422,9 @@ export function ChatPage() {
           value={providerId}
           onChange={(e) => handleProviderChange(e.target.value)}
         >
-          {enabledProviders.length === 0 && <option value="">未配置模型</option>}
+          {enabledProviders.length === 0 && (
+            <option value="">{initialized ? '未配置模型' : '加载中…'}</option>
+          )}
           {/* M15：档位快捷入口（绑定的 providerId 作 value，选了等于直接选那个 provider）*/}
           {tiers.length > 0 && enabledProviders.length > 0 && (
             <optgroup label="⚡ 档位">
@@ -470,12 +542,61 @@ export function ChatPage() {
 
       {/* 输入区 */}
       <div className="border-t bg-card p-4">
+        {/* v1.17 对话发图：待发送图片预览区 */}
+        {pendingImages.length > 0 && (
+          <div className="mx-auto mb-2 flex max-w-3xl flex-wrap gap-2">
+            {pendingImages.map((img, i) => (
+              <div key={i} className="group relative">
+                <img
+                  src={img.dataUrl}
+                  alt={img.name}
+                  className="h-16 w-16 rounded-md border object-cover"
+                />
+                <button
+                  onClick={() => removePendingImage(i)}
+                  className="absolute -right-1.5 -top-1.5 rounded-full bg-destructive p-0.5 text-destructive-foreground shadow"
+                  title="移除"
+                >
+                  <X size={10} />
+                </button>
+              </div>
+            ))}
+          </div>
+        )}
         <div className="mx-auto flex max-w-3xl items-end gap-2">
+          {/* v1.17 对话发图：上传图片按钮 */}
+          <input
+            ref={chatImgInputRef}
+            type="file"
+            accept="image/*"
+            multiple
+            onChange={handlePickChatImage}
+            className="hidden"
+          />
+          <Button
+            variant="outline"
+            size="icon"
+            onClick={() => chatImgInputRef.current?.click()}
+            disabled={streaming}
+            title="上传图片（也可直接粘贴）"
+            className="h-[44px] w-[44px] shrink-0"
+          >
+            <ImageSquare size={16} />
+          </Button>
           <Textarea
             value={input}
             onChange={(e) => setInput(e.target.value)}
-            placeholder={providerId ? '输入消息，Enter 发送，Shift+Enter 换行' : '请先在设置页配置模型'}
-            disabled={!providerId || streaming}
+            onPaste={handlePaste}
+            placeholder={
+              !initialized
+                ? '正在加载模型配置…'
+                : providerId
+                  ? '输入消息，Enter 发送，Shift+Enter 换行（可粘贴/上传图片）'
+                  : '请先在设置页配置模型'
+            }
+            // v1.16.1：只在发送中禁用，不再因 providerId 未加载完误伤输入。
+            // 没 provider 时仍允许打字（发送时兜底提示），避免启动期输入框点不动。
+            disabled={streaming}
             onKeyDown={(e) => {
               if (e.key === 'Enter' && !e.shiftKey) {
                 e.preventDefault()
@@ -485,7 +606,11 @@ export function ChatPage() {
             className="min-h-[44px] max-h-[160px] resize-none"
             rows={1}
           />
-          <Button onClick={handleSend} disabled={!input.trim() || !providerId || streaming}>
+          <Button
+            onClick={handleSend}
+            // v1.17：有图片也能发（不强制必须有文字）
+            disabled={(!input.trim() && pendingImages.length === 0) || !providerId || streaming}
+          >
             {streaming ? '回复中…' : '发送'}
           </Button>
           {streaming && (
@@ -590,6 +715,20 @@ function MessageBubble({ msg }: { msg: ChatMessage }) {
                 </span>
               </span>
             )}
+          </div>
+        )}
+
+        {/* v1.17 对话发图：user 消息的图片附件展示（消息块下方，点击放大可选，MVP 先小图） */}
+        {msg.attachments && msg.attachments.length > 0 && (
+          <div className={`flex flex-wrap gap-1.5 ${isUser ? 'justify-end' : 'justify-start'}`}>
+            {msg.attachments.map((att, i) => (
+              <img
+                key={i}
+                src={att.dataUrl}
+                alt={att.name}
+                className="h-24 rounded-md border border-border object-cover shadow-sm"
+              />
+            ))}
           </div>
         )}
       </div>

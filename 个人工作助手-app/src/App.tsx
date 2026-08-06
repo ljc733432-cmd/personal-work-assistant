@@ -99,21 +99,24 @@ function App() {
 
       {/* 主区 */}
       <main className="flex-1 overflow-hidden">
+        {/* v1.17.1：ChatPage 始终挂载（用 hidden 控制显隐，不卸载），
+            避免切板块时流式中断 + pendingImages/订阅丢失。其他页面保持条件渲染。 */}
+        <div className={tab === 'chat' ? 'h-full' : 'hidden'}>
+          <ChatPage />
+        </div>
         {tab === 'overview' ? (
           <OverviewPage />
         ) : tab === 'dashboard' ? (
           <DashboardPage />
-        ) : tab === 'chat' ? (
-          <ChatPage />
         ) : tab === 'tasks' ? (
           <TasksPage />
         ) : tab === 'notes' ? (
           <NotesPage />
         ) : tab === 'tools' ? (
           <ToolsPage />
-        ) : (
+        ) : tab === 'settings' ? (
           <SettingsPage />
-        )}
+        ) : null}
       </main>
     </div>
   )

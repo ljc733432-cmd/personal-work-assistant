@@ -41,11 +41,14 @@ import {
   deleteNote,
   searchNotes,
 } from '../services/notes/noteStore'
-import { getNotesDir, setNotesDir } from '../services/notes/config'
+import { getNotesDir, setNotesDir, ensureNotesDir } from '../services/notes/config'
+import fs from 'node:fs'
 import { convertDocument, supportedTargets } from '../services/converter'
 import { getPdfInfo, mergePdfs, extractPages, splitPdf } from '../services/pdfToolbox'
 import { chatWithProvider, type ChatResult } from '../services/providers/chat'
 import { truncateByTokenBudget } from '../services/providers/truncate'
+import { recognizeImage } from '../services/ocrService'
+import os from 'node:os'
 import { resolveProviderId } from '../services/providers/router'
 import { extractTasks } from '../services/taskExtractor'
 import { generateReport } from '../services/reportGenerator'
@@ -402,6 +405,74 @@ function registerSearchProviderHandlers() {
   })
 }
 
+// v1.17 对话发图：判断模型是否支持视觉（多模态）。
+// 启发式按 model 名判断——智谱 GLM-4V/4.5/4.6 系列支持视觉，DeepSeek/flash 纯文本不支持。
+// 不够准时可在设置页加手动标记（第二阶段），当前零配置。
+function isVisionModel(model: string): boolean {
+  return /glm-4v|glm-4\.5|glm-4\.6|vision|vl|multimodal/i.test(model)
+}
+
+// v1.17 对话发图：把消息里的图片附件按模型能力分流处理，返回处理后的 messages（供 chatWithProvider）。
+//  - 视觉模型：user 消息 content 改成 OpenAI 多模态数组 [{type:'text'}, {type:'image_url'}]
+//  - 纯文本模型：图片写临时文件 → OCR 转文字 → 拼进 content（[图片识别]\n{文字}）
+// 返回新数组，不改原 messages。无附件的消息原样透传。
+async function processImageAttachments(
+  messages: { role: string; content: string; attachments?: { name: string; dataUrl: string }[] }[],
+  model: string,
+): Promise<{ role: string; content: string | unknown[] }[]> {
+  const vision = isVisionModel(model)
+  const result: { role: string; content: string | unknown[] }[] = []
+
+  for (const m of messages) {
+    if (!m.attachments || m.attachments.length === 0) {
+      result.push({ role: m.role, content: m.content })
+      continue
+    }
+
+    if (vision) {
+      // 视觉模型：拼多模态 content 数组（OpenAI 格式）
+      const parts: unknown[] = []
+      if (m.content.trim()) {
+        parts.push({ type: 'text', text: m.content })
+      }
+      for (const att of m.attachments) {
+        parts.push({ type: 'image_url', image_url: { url: att.dataUrl } })
+      }
+      result.push({ role: m.role, content: parts })
+    } else {
+      // 纯文本模型：OCR 每张图，文字拼进 content
+      let ocrText = m.content
+      for (let i = 0; i < m.attachments.length; i++) {
+        const att = m.attachments[i]
+        try {
+          // base64 写临时文件（ocrService 收文件路径）
+          const tmpPath = await writeDataUrlToTemp(att.dataUrl)
+          const text = await recognizeImage(tmpPath)
+          fs.unlinkSync(tmpPath) // 删临时文件
+          ocrText += `\n\n[图片${i + 1} 识别结果]\n${text || '（未识别到文字）'}`
+        } catch (e) {
+          ocrText += `\n\n[图片${i + 1} 识别失败：${String(e instanceof Error ? e.message : e)}]`
+        }
+      }
+      result.push({ role: m.role, content: ocrText.trim() })
+    }
+  }
+  return result
+}
+
+/** 把 data URL（data:image/png;base64,xxx）写成临时文件，返回路径。OCR 用。 */
+async function writeDataUrlToTemp(dataUrl: string): Promise<string> {
+  const m = /^data:image\/(\w+);base64,(.+)$/.exec(dataUrl)
+  if (!m) throw new Error('无效的图片 dataUrl')
+  const ext = m[1] === 'jpeg' ? 'jpg' : m[1]
+  const buf = Buffer.from(m[2], 'base64')
+  const tmpDir = path.join(os.tmpdir(), 'pwa-ocr')
+  fs.mkdirSync(tmpDir, { recursive: true })
+  const filePath = path.join(tmpDir, `${Date.now()}-${Math.random().toString(36).slice(2, 8)}.${ext}`)
+  fs.writeFileSync(filePath, buf)
+  return filePath
+}
+
 function registerChatHandlers() {
   // reqId → AbortController（取消）
   const abortMap = new Map<string, AbortController>()
@@ -562,10 +633,17 @@ function registerChatHandlers() {
             })()
           : truncated
 
+      // v1.17 对话发图：按模型能力处理图片附件（视觉→多模态；纯文本→OCR 转文字）。
+      // 在截断后处理——当前轮的 user 消息（含附件）在最后，不会被截断丢弃。
+      const messagesWithImages = await processImageAttachments(
+        messagesForModel as { role: string; content: string; attachments?: { name: string; dataUrl: string }[] }[],
+        model,
+      )
+
       const result = await chatWithProvider({
         client,
         model,
-        messages: messagesForModel,
+        messages: messagesWithImages as any,
         tools,
         onToken,
         onToolCall,
@@ -1138,6 +1216,31 @@ function registerNoteHandlers() {
       return err(String(e))
     }
   })
+
+  // v1.17 笔记贴图（PRD §15.2 笔记增强）：保存粘贴/上传的图片到笔记库 images/ 子目录。
+  // 入参 {noteId, dataUrl}，dataUrl 形如 data:image/png;base64,xxxx。
+  // 返回 markdown 相对引用路径 images/xxx.png，前端在光标处插入 ![](images/xxx.png)。
+  // 图片与 .md 同库（笔记库/images/），预览态 react-markdown 用相对路径能正确渲染。
+  ipcMain.handle(
+    'note:save_image',
+    (_, params: { noteId: string; dataUrl: string }): IpcResult<{ relPath: string }> => {
+      try {
+        // 解析 dataUrl：data:image/png;base64,xxxx
+        const m = /^data:image\/(\w+);base64,(.+)$/.exec(params.dataUrl)
+        if (!m) return err('无效的图片 dataUrl（期望 data:image/xxx;base64,...）')
+        const ext = m[1] === 'jpeg' ? 'jpg' : m[1]
+        const buf = Buffer.from(m[2], 'base64')
+        const notesDir = ensureNotesDir()
+        const imagesDir = path.join(notesDir, 'images')
+        fs.mkdirSync(imagesDir, { recursive: true })
+        const fileName = `${Date.now()}-${Math.random().toString(36).slice(2, 8)}.${ext}`
+        fs.writeFileSync(path.join(imagesDir, fileName), buf)
+        return ok({ relPath: `images/${fileName}` })
+      } catch (e) {
+        return err(String(e))
+      }
+    },
+  )
 
   // ---------- AI 笔记助手（v1.9 M18，PRD §15.2①） ----------
   // 复用 report.providerId（与报告模型共用，零新配置项）。非流式，照搬 report:generate 的可取消模式。

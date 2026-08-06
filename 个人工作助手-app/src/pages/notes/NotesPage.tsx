@@ -1,4 +1,4 @@
-import { useEffect, useState, useRef } from 'react'
+import { useEffect, useState, useRef, useMemo, type ClipboardEvent } from 'react'
 import {
   Plus,
   Search,
@@ -13,6 +13,8 @@ import {
   CheckSquare,
   CaretDown,
   CaretRight,
+  TextAlignLeft,
+  ImageSquare,
 } from '@/components/ui/icons'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
@@ -46,13 +48,34 @@ export function NotesPage() {
   // 当前编辑缓冲（标题/正文/标签），保存时落库
   const [draftTitle, setDraftTitle] = useState('')
   const [draftContent, setDraftContent] = useState('')
+  // v1.17 笔记贴图：textarea ref（光标处插入图片引用）+ 隐藏 file input
+  const taRef = useRef<HTMLTextAreaElement>(null)
+  const imgInputRef = useRef<HTMLInputElement>(null)
+  // v1.17 笔记贴图：笔记库目录（预览态解析图片相对路径用），挂载时拉一次
+  const [notesDir, setNotesDir] = useState('')
 
   useEffect(() => {
     refresh()
     refreshTasks() // v1.9.1：拉任务列表用于判断笔记待办「已转」状态
+    // v1.17：拉笔记库目录，预览态解析图片相对路径
+    invoke<string>('note:getDir').then(setNotesDir).catch(() => {})
   }, [refresh, refreshTasks])
 
   const active = notes.find((n) => n.id === activeId) ?? null
+
+  // v1.15 笔记大纲（§15.2③）：解析当前笔记标题层级。
+  // 编辑态读 draftContent（用户最新输入），预览态读 active.content（落库版本）——
+  // 与 NoteAiPanel（读 draft）/ NoteTodosPanel（读 active）的「两态读不同内容」现状一致。
+  const outlineContent = editing ? draftContent : active?.content ?? ''
+  const headings = useMemo(() => parseHeadings(outlineContent), [outlineContent])
+
+  // 预览态点击大纲跳转到对应标题（Markdown 组件给 heading 加了 slugified id）。
+  // 编辑态不跳转（textarea 无法滚动到行，体验差，按 §15.2 方案 A 决策）。
+  const handleJumpHeading = (slug: string) => {
+    if (editing) return
+    const el = document.getElementById(slug)
+    if (el) el.scrollIntoView({ behavior: 'smooth', block: 'start' })
+  }
 
   // 选中笔记时，把它的内容载入编辑缓冲
   useEffect(() => {
@@ -112,6 +135,68 @@ export function NotesPage() {
     } catch {
       setHits(null)
     }
+  }
+
+  // v1.17 笔记贴图：把图片 dataUrl 存到笔记库 images/，在 textarea 光标处插入 ![](relPath)。
+  // 粘贴和上传都走这条。需在编辑态（有 active 笔记）才能贴图。
+  const insertImageAtCursor = async (dataUrl: string) => {
+    if (!active) return
+    try {
+      const r = await invoke<{ relPath: string }>('note:save_image', {
+        noteId: active.id,
+        dataUrl,
+      })
+      const md = `![](${r.relPath})`
+      const ta = taRef.current
+      if (ta) {
+        // 光标处插入（setRangeText 同步更新 value + 光标位置）
+        const start = ta.selectionStart
+        const end = ta.selectionEnd
+        ta.setRangeText(md, start, end, 'end')
+        setDraftContent(ta.value)
+        ta.focus()
+      } else {
+        // 兜底：无 ref 时追加到末尾
+        setDraftContent((c) => `${c}\n${md}\n`)
+      }
+    } catch (e) {
+      console.error('[notes] 插入图片失败', e)
+      alert('插入图片失败：' + String(e))
+    }
+  }
+
+  // 粘贴图片：拦截 clipboardData 里的图片项，转 dataUrl 后插入
+  const handlePaste = (e: ClipboardEvent<HTMLTextAreaElement>) => {
+    const items = e.clipboardData?.items
+    if (!items) return
+    let imgItem: DataTransferItem | null = null
+    for (const it of items) {
+      if (it.type.startsWith('image/')) {
+        imgItem = it
+        break
+      }
+    }
+    if (!imgItem) return // 没图片，走默认粘贴（文本）
+    e.preventDefault()
+    const file = imgItem.getAsFile()
+    if (!file) return
+    const reader = new FileReader()
+    reader.onload = () => {
+      if (typeof reader.result === 'string') insertImageAtCursor(reader.result)
+    }
+    reader.readAsDataURL(file)
+  }
+
+  // 上传图片：隐藏 input change → 同流程
+  const handlePickImage = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0]
+    if (!file) return
+    const reader = new FileReader()
+    reader.onload = () => {
+      if (typeof reader.result === 'string') insertImageAtCursor(reader.result)
+    }
+    reader.readAsDataURL(file)
+    e.target.value = '' // 清空，允许重复选同一文件
   }
 
   // AI 面板「插入到笔记末尾」回调。
@@ -271,12 +356,37 @@ export function NotesPage() {
             {/* 正文 */}
             <div className="flex flex-1 flex-col overflow-hidden px-6 py-4">
               {editing ? (
-                <Textarea
-                  value={draftContent}
-                  onChange={(e) => setDraftContent(e.target.value)}
-                  placeholder="输入 Markdown 正文…（Shift+Enter 换行）"
-                  className="min-h-0 flex-1 resize-none border-transparent bg-transparent font-mono text-sm focus-visible:ring-0"
-                />
+                <>
+                  {/* v1.17 笔记贴图：编辑工具条（始终可见，不藏折叠区——v1.10.6 红线） */}
+                  <div className="mb-2 flex items-center gap-2">
+                    <Button
+                      size="sm"
+                      variant="outline"
+                      onClick={() => imgInputRef.current?.click()}
+                      className="h-7 gap-1.5 text-xs"
+                    >
+                      <ImageSquare size={13} /> 插入图片
+                    </Button>
+                    <span className="text-[10px] text-muted-foreground">
+                      也可直接 Ctrl+V 粘贴图片（自动存入笔记库 images/）
+                    </span>
+                    <input
+                      ref={imgInputRef}
+                      type="file"
+                      accept="image/*"
+                      onChange={handlePickImage}
+                      className="hidden"
+                    />
+                  </div>
+                  <Textarea
+                    ref={taRef}
+                    value={draftContent}
+                    onChange={(e) => setDraftContent(e.target.value)}
+                    onPaste={handlePaste}
+                    placeholder="输入 Markdown 正文…（Shift+Enter 换行，可粘贴图片）"
+                    className="min-h-0 flex-1 resize-none border-transparent bg-transparent font-mono text-sm focus-visible:ring-0"
+                  />
+                </>
               ) : (
                 <div className="mx-auto flex-1 overflow-y-auto max-w-5xl px-2">
                   {/* v1.9.1 笔记待办转任务面板（PRD §15.2②）：解析 - [ ] 未勾选项，提供转任务按钮 */}
@@ -297,7 +407,7 @@ export function NotesPage() {
                   )}
                   {active.content.trim() ? (
                     <div className="mx-auto max-w-4xl">
-                      <Markdown content={active.content} />
+                      <Markdown content={active.content} imgBaseUrl={notesDir} />
                     </div>
                   ) : (
                     <div className="py-12 text-center text-sm text-muted-foreground">
@@ -316,6 +426,12 @@ export function NotesPage() {
           />
         )}
       </div>
+
+      {/* 右列：大纲（v1.15 §15.2③）。预览态点击跳转，编辑态只读展示。
+          选中笔记即显示（无标题时侧栏仍在，内部提示「无标题」），便于排查渲染问题。 */}
+      {active && (
+        <OutlinePanel headings={headings} editing={editing} onJump={handleJumpHeading} />
+      )}
     </div>
   )
 }
@@ -720,6 +836,142 @@ function NoteTodosPanel({
         </ul>
       )}
       {error && <p className="mt-2 text-[10px] text-destructive">转任务失败：{error}</p>}
+    </div>
+  )
+}
+
+// ---------- 笔记大纲（v1.15 §15.2③）----------
+// 解析 Markdown 标题行 → 大纲树。预览态点击跳转到对应 heading id。
+// slugify 必须与 Markdown.tsx 的 slugify 完全一致，否则跳转 id 对不上。
+
+const HEADING_RE = /^(#{1,6})\s+(.+?)\s*#*\s*$/
+
+interface Heading {
+  level: number // 1-6
+  text: string
+  slug: string // 与 Markdown 渲染出的 heading id 一致
+}
+
+/** slugify：与 Markdown.tsx 的实现严格保持一致（保留中文，标点/空白转 -）。 */
+function slugifyHeading(text: string): string {
+  return text
+    .trim()
+    .toLowerCase()
+    .replace(/[\s\p{P}]+/gu, '-')
+    .replace(/^-+|-+$/g, '')
+}
+
+/** 解析笔记内容里的标题行，生成带 slug 的大纲列表。
+ *  slug 按出现顺序加序号，与 Markdown 组件的 idCounter 逻辑一致——
+ *  保证点击大纲跳转的 id 与实际渲染的 heading id 完全对应。 */
+function parseHeadings(content: string): Heading[] {
+  const result: Heading[] = []
+  const seen = new Map<string, number>()
+  for (const line of content.split('\n')) {
+    const m = HEADING_RE.exec(line)
+    if (!m) continue
+    const level = m[1].length
+    const text = m[2].trim()
+    const base = slugifyHeading(text) || 'heading'
+    const count = seen.get(base) ?? 0
+    seen.set(base, count + 1)
+    result.push({ level, text, slug: count === 0 ? base : `${base}-${count}` })
+  }
+  return result
+}
+
+function OutlinePanel({
+  headings,
+  editing,
+  onJump,
+}: {
+  headings: Heading[]
+  editing: boolean
+  onJump: (slug: string) => void
+}) {
+  // 折叠的 level 集合：点某个标题的折叠箭头，其下属（更深 level）标题收起。
+  const [collapsed, setCollapsed] = useState<Set<number>>(new Set())
+
+  const toggle = (idx: number) => {
+    setCollapsed((prev) => {
+      const next = new Set(prev)
+      if (next.has(idx)) next.delete(idx)
+      else next.add(idx)
+      return next
+    })
+  }
+
+  // 判断某个标题是否可见：从最近祖先往上查，任一祖先被折叠则隐藏。
+  const isVisible = (idx: number): boolean => {
+    const target = headings[idx]
+    for (let i = idx - 1; i >= 0; i--) {
+      const h = headings[i]
+      if (h.level < target.level) {
+        // h 是 idx 的最近祖先（level 更浅）。h 被折叠 → 整个子树隐藏。
+        if (collapsed.has(i)) return false
+        // h 未折叠 → idx 是否可见取决于 h 自己的祖先链。
+        return isVisible(i)
+      }
+    }
+    return true // 无祖先（顶层标题）永远可见
+  }
+
+  return (
+    <div className="flex w-[220px] shrink-0 flex-col border-l bg-card">
+      <div className="flex items-center gap-1.5 border-b px-3 py-2 text-xs font-medium text-muted-foreground">
+        <TextAlignLeft size={13} />
+        <span>大纲</span>
+        {editing && <span className="text-[10px] text-muted-foreground/60">（编辑态仅展示）</span>}
+      </div>
+      <div className="flex-1 overflow-y-auto p-1.5">
+        {headings.length === 0 ? (
+          <div className="px-2 py-3 text-center text-[11px] text-muted-foreground">
+            这条笔记没有 Markdown 标题（# 开头的行）。
+            <br />
+            加个标题就会出现大纲。
+          </div>
+        ) : (
+          <ul className="space-y-0.5 text-xs">
+            {headings.map((h, i) => {
+              if (!isVisible(i)) return null
+              // 是否有子标题（更深 level 的后续标题，且未被折叠隐藏）——决定显示折叠箭头
+              const hasChildren = headings.slice(i + 1).some((nh) => nh.level > h.level)
+              const isCollapsed = collapsed.has(i)
+              return (
+                <li
+                  key={i}
+                  style={{ paddingLeft: `${(h.level - 1) * 12 + 4}px` }}
+                  className="flex items-center gap-1"
+                >
+                  {hasChildren ? (
+                    <button
+                      onClick={() => toggle(i)}
+                      className="shrink-0 text-muted-foreground/70 transition-colors hover:text-foreground"
+                    >
+                      {isCollapsed ? <CaretRight size={11} /> : <CaretDown size={11} />}
+                    </button>
+                  ) : (
+                    <span className="w-[11px] shrink-0" />
+                  )}
+                  <button
+                    onClick={() => onJump(h.slug)}
+                    disabled={editing}
+                    title={editing ? '编辑态不可跳转' : '跳转到此处'}
+                    className={cn(
+                      'flex-1 truncate rounded px-1 py-0.5 text-left transition-colors',
+                      editing
+                        ? 'cursor-default text-muted-foreground'
+                        : 'text-foreground/80 hover:bg-surface-3 hover:text-foreground',
+                    )}
+                  >
+                    {h.text}
+                  </button>
+                </li>
+              )
+            })}
+          </ul>
+        )}
+      </div>
     </div>
   )
 }
