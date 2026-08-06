@@ -126,7 +126,12 @@ export function TasksPage() {
   const { tasks, refresh, upsert, remove, createSubtask, promoteSubtask, setParent } = useTasksStore()
   const [filter, setFilter] = useState<Filter>('all')
   // v1.10.8：分组维度，默认按截止日
+  // v1.18：偏好持久化到 settings KV tasks.groupBy，切回任务页记住上次选择
   const [groupBy, setGroupBy] = useState<GroupBy>('due')
+  const handleGroupByChange = (v: GroupBy) => {
+    setGroupBy(v)
+    invoke<true>('settings:set', 'tasks.groupBy', v).catch(() => {})
+  }
   const [editingId, setEditingId] = useState<string | null>(null)
   // v1.11：标签筛选（'all'=全部，null=未标注，其他=指定标签）
   const [tagFilter, setTagFilter] = useState<string | 'all' | null>('all')
@@ -144,6 +149,12 @@ export function TasksPage() {
         } catch {
           /* 容错：坏数据忽略 */
         }
+      }
+    })
+    // v1.18：加载分组偏好（持久化，之前每次默认 due，现在记住用户选择）
+    invoke<string | null>('settings:get', 'tasks.groupBy').then((raw) => {
+      if (raw === 'due' || raw === 'priority' || raw === 'none') {
+        setGroupBy(raw)
       }
     })
   }, [refresh])
@@ -308,7 +319,7 @@ export function TasksPage() {
             <span className="text-[11px] text-muted-foreground">分组</span>
             <select
               value={groupBy}
-              onChange={(e) => setGroupBy(e.target.value as GroupBy)}
+              onChange={(e) => handleGroupByChange(e.target.value as GroupBy)}
               className="h-7 rounded-md border border-input bg-background px-2 text-xs"
             >
               <option value="due">按截止日</option>
