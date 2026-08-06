@@ -14,6 +14,11 @@ dist-electron
 release
 *.local
 
+# OCR 语言数据（v1.16）：build/tessdata 是打包用的 traineddata，30MB+，不入 git。
+# 打包时由 electron-builder extraResources 从此目录复制到 resources/tessdata。
+# 新机器/新 AI 接手需重新下载（见 docs/项目总结.md v1.16 说明）。
+build/tessdata
+
 # Editor directories and files
 .vscode/.debug.env
 .idea

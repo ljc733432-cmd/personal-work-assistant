@@ -6,7 +6,16 @@
   "asarUnpack": [
     "**/node_modules/better-sqlite3/**",
     "**/node_modules/better-sqlite3/build/Release/*.node",
-    "**/build/icon.*"
+    "**/build/icon.*",
+    "**/node_modules/tesseract.js/**",
+    "**/node_modules/tesseract.js-core/**"
+  ],
+  "extraResources": [
+    {
+      "from": "build/tessdata",
+      "to": "tessdata",
+      "filter": ["*.traineddata.gz"]
+    }
   ],
   "directories": {
     "output": "release/${version}",

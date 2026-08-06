@@ -8,6 +8,7 @@ import fs from 'node:fs'
 import { registerIpcHandlers } from '../ipc'
 import { logError, logInfo } from '../services/logger'
 import { closeDb, getDb } from '../services/db'
+import { closeOcrWorker } from '../services/ocrService'
 import { settings } from '../services/db/schema'
 import { eq } from 'drizzle-orm'
 import {
@@ -300,6 +301,8 @@ app.on('before-quit', () => {
 })
 
 // M6：所有窗口已关、app 即将退，关闭 DB 连接（之前一直没调，WAL 不落盘）
-app.on('will-quit', () => {
+// v1.16：同时清理 OCR worker（释放约 50-100MB 内存）
+app.on('will-quit', async () => {
   closeDb()
+  await closeOcrWorker()
 })

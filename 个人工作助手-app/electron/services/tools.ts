@@ -8,6 +8,7 @@ import {
   updateNote,
 } from './notes/noteStore'
 import { convertDocument } from './converter'
+import { recognizeImage } from './ocrService'
 import {
   listFiles,
   readFileContent,
@@ -509,6 +510,8 @@ export function assembleTools(ctx: ToolContext): ToolRegistration[] {
     makeUpdateNoteTool(),
     // M12.9：文档转换（A 轨 FC）。无破坏性（原文件不动），不走二次确认。
     makeConvertDocumentTool(),
+    // v1.16：图片 OCR（A 轨 FC）。本地 tesseract 识别，不调模型，路径走 resolveSafePath。
+    makeOcrImageTool(ctx),
   ]
   // M6：跟进会话额外注册任务状态修改工具（走二次确认）
   if (ctx.conversationType === 'followup') {
@@ -800,6 +803,83 @@ function makeConvertDocumentTool(): ToolRegistration {
             : { ok: false, error: result.error ?? '转换失败' },
         ),
       }
+    },
+  }
+}
+
+// ---------- ocr_image：图片文字识别（v1.16 PRD §15.4④） ----------
+// 本地 tesseract.js OCR，不依赖模型多模态——任何 Provider 都能用（图片已转文字）。
+// 支持中英文（chi_sim+eng）。路径校验同 read_file（resolveSafePath + 首次确认）。
+const IMAGE_EXTS = new Set(['.png', '.jpg', '.jpeg', '.bmp', '.webp', '.gif', '.tif', '.tiff'])
+function makeOcrImageTool(ctx: ToolContext): ToolRegistration {
+  const labels = ctx.sources.map((d) => `「${d.label}」`).join('、')
+  return {
+    def: {
+      type: 'function',
+      function: {
+        name: 'ocr_image',
+        description:
+          `识别图片中的文字（OCR，本地识别不调用模型）。支持 png/jpg/bmp/webp/tiff，中英文。` +
+          `当用户说「识别这张图」「图片里写了什么」「读一下截图」时调用。` +
+          `识别结果是一段纯文本。拿到结果后，请根据用户意图进一步处理：` +
+          `用户要总结就总结、要翻译就翻译、要提炼要点就提炼——不要只把原始文字贴回去。` +
+          `可访问目录：${labels}。访问新目录会要求用户首次确认。`,
+        parameters: {
+          type: 'object',
+          properties: {
+            path: { type: 'string', description: '图片文件路径，可用 find_files 返回的路径，或「label/子路径」' },
+          },
+          required: ['path'],
+        },
+      },
+    },
+    handler: async (args, confirm) => {
+      const p = String(args.path ?? '').trim()
+      if (!p) {
+        return { kind: 'result', value: JSON.stringify({ error: 'path 不能为空' }) }
+      }
+      // 扩展名校验（在路径校验前给出清晰提示）
+      const ext = path.extname(p).toLowerCase()
+      if (!IMAGE_EXTS.has(ext)) {
+        return {
+          kind: 'result',
+          value: JSON.stringify({
+            error: `不支持的图片格式 ${ext || '(无扩展名)'}`,
+            hint: `支持：${[...IMAGE_EXTS].join(' / ')}`,
+          }),
+        }
+      }
+      // 路径校验 + 首次确认（同 read_file）
+      return await withDirConfirm(ctx, confirm, p, async () => {
+        // resolveSafePath 已确认路径安全，这里再校验文件存在
+        // （withDirConfirm 的 op 收到 sources 但我们已 resolve，直接用解析后的全路径）
+        const resolved = resolveSafePath(p, ctx.sources)
+        if (!resolved.ok || !resolved.fullPath) {
+          return JSON.stringify({ error: resolved.error ?? '路径解析失败', inputPath: p })
+        }
+        try {
+          const stat = await fsp.stat(resolved.fullPath)
+          if (!stat.isFile()) {
+            return JSON.stringify({ error: '不是文件', path: resolved.fullPath })
+          }
+        } catch {
+          return JSON.stringify({ error: '文件不存在', path: resolved.fullPath })
+        }
+        try {
+          const text = await recognizeImage(resolved.fullPath)
+          return JSON.stringify({
+            ok: true,
+            text: text || '（未识别到文字，可能是空白图或文字不清晰）',
+            path: resolved.fullPath,
+          })
+        } catch (e) {
+          return JSON.stringify({
+            ok: false,
+            error: String(e instanceof Error ? e.message : e),
+            hint: 'OCR 失败常见原因：语言数据缺失/损坏、图片过大、图片无文字。首次使用需加载语言数据（约 2-3 秒）。',
+          })
+        }
+      })
     },
   }
 }
