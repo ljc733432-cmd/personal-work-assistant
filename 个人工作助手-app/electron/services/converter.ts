@@ -23,7 +23,7 @@ import { getNotesDir } from './notes/config'
 // 启用同步模式（marked 默认可能返回 Promise）
 marked.setOptions({ async: false, gfm: true })
 
-export type TargetFormat = 'md' | 'txt' | 'html' | 'docx' | 'pdf'
+export type TargetFormat = 'md' | 'txt' | 'html' | 'docx' | 'pdf' | 'csv' | 'xlsx'
 
 export interface ConvertResult {
   ok: boolean
@@ -36,9 +36,11 @@ export interface ConvertResult {
 
 /** 支持的输入→输出组合。 */
 const SUPPORTED: Record<string, TargetFormat[]> = {
-  md: ['txt', 'html', 'docx', 'pdf'],
+  md: ['txt', 'html', 'docx', 'pdf', 'csv', 'xlsx'],
   txt: ['md'],
   docx: ['md', 'txt', 'html'],
+  csv: ['md', 'txt', 'html', 'xlsx'],
+  xlsx: ['csv', 'md', 'txt', 'html'],
 }
 
 export function supportedTargets(inputExt: string): TargetFormat[] {
@@ -57,13 +59,16 @@ export async function convertDocument(params: {
 }): Promise<ConvertResult> {
   const { inputPath: inputRaw, targetFormat, outputPath: outputRaw } = params
 
-  // 1. 校验输入路径（白名单内）
+  // 1. 校验输入路径。输入来自用户 pickFile 主动选（显式授权），所以：
+  //    - sensitive 黑名单命中 → resolveSafePath 返 error，拒（密钥/系统目录）
+  //    - needsConfirm（锁定模式下首次访问新目录）→ 放行（用户已主动选文件）
+  //    - 真 error → 拒
   const sources = buildSourcesForConvert()
   const inResolved = resolveSafePath(inputRaw, sources)
-  if (!inResolved.ok || !inResolved.fullPath) {
+  if (!inResolved.ok && !inResolved.needsConfirm) {
     return fail(inputRaw, targetFormat, inResolved.error ?? '输入路径非法')
   }
-  const inputPath = inResolved.fullPath
+  const inputPath = inResolved.fullPath ?? path.resolve(inputRaw)
   if (!fs.existsSync(inputPath)) {
     return fail(inputRaw, targetFormat, `输入文件不存在：${inputPath}`)
   }
@@ -84,11 +89,15 @@ export async function convertDocument(params: {
     return fail(inputRaw, targetFormat, '输出路径非法')
   }
 
-  // 3. 读输入内容
-  let content: string
+  // 3. 读输入内容。csv/xlsx 解析成表格中间表示 string[][]；其余是字符串
+  let content: string | string[][]
   try {
     if (inputExt === 'docx') {
       content = await readDocx(inputPath, targetFormat)
+    } else if (inputExt === 'xlsx') {
+      content = await readXlsxAsTable(inputPath)
+    } else if (inputExt === 'csv') {
+      content = await fsp.readFile(inputPath, 'utf8')
     } else {
       content = await fsp.readFile(inputPath, 'utf8')
     }
@@ -100,10 +109,17 @@ export async function convertDocument(params: {
   try {
     let outBuffer: Buffer | string
     if (inputExt === 'md' || inputExt === 'txt') {
-      outBuffer = await convertFromMdOrTxt(content, inputExt, targetFormat)
+      outBuffer = await convertFromMdOrTxt(content as string, inputExt, targetFormat)
+    } else if (inputExt === 'csv') {
+      // csv 字符串 → 表格 → 目标
+      const table = parseCsv(content as string)
+      outBuffer = await convertFromTable(table, targetFormat)
+    } else if (inputExt === 'xlsx') {
+      // xlsx 已是表格中间表示
+      outBuffer = await convertFromTable(content as string[][], targetFormat)
     } else {
       // docx 已经在 readDocx 里转成目标格式字符串了
-      outBuffer = content
+      outBuffer = content as string
     }
     await fsp.writeFile(outputPath, outBuffer)
     const bytes = fs.statSync(outputPath).size
@@ -145,6 +161,13 @@ async function convertFromMdOrTxt(content: string, fromExt: string, to: TargetFo
       return await buildDocx(content)
     case 'pdf':
       return await buildPdf(content)
+    case 'csv':
+    case 'xlsx': {
+      // md 表格 → 表格中间表示 → csv/xlsx。非表格 md 提示无表格
+      const table = parseMarkdownTable(content)
+      if (table.length === 0) throw new Error('Markdown 内容没有识别到表格（需 GFM 表格语法 | a | b |）')
+      return await convertFromTable(table, to)
+    }
   }
 }
 
@@ -299,4 +322,188 @@ function swapExt(filePath: string, target: TargetFormat): string {
 
 function fail(input: string, target: TargetFormat, error: string): ConvertResult {
   return { ok: false, outputPath: '', inputFormat: '', targetFormat: target, bytes: 0, error }
+}
+
+// ---------- v1.20 表格互转 helpers（PRD §15.4⑨ V-Z9）----------
+// 中间表示：string[][]（行×列）。csv/xlsx/md表格 都先转成它，再转成目标格式。
+
+/** 读 xlsx（SheetJS）→ 表格中间表示。取第一个 sheet，sheet_to_json(header:1) 得行数组。 */
+export async function readXlsxAsTable(file: string): Promise<string[][]> {
+  const XLSX = await import('xlsx')
+  const buf = fs.readFileSync(file)
+  const wb = XLSX.read(buf, { type: 'buffer' })
+  const firstSheet = wb.SheetNames[0]
+  if (!firstSheet) return []
+  const ws = wb.Sheets[firstSheet]
+  const rows = XLSX.utils.sheet_to_json<string[]>(ws, { header: 1, raw: false, defval: '' })
+  // 统一成 string，trim null/undefined
+  return rows.map((r) => (Array.isArray(r) ? r.map((c) => (c == null ? '' : String(c))) : [String(r)]))
+}
+
+/** 解析 CSV 字符串 → 表格。处理引号包裹（含逗号/换行/引号转义）。 */
+export function parseCsv(text: string): string[][] {
+  const rows: string[][] = []
+  let row: string[] = []
+  let field = ''
+  let inQuotes = false
+  let i = 0
+  while (i < text.length) {
+    const ch = text[i]
+    if (inQuotes) {
+      if (ch === '"') {
+        if (text[i + 1] === '"') {
+          field += '"'
+          i += 2
+          continue
+        }
+        inQuotes = false
+        i++
+        continue
+      }
+      field += ch
+      i++
+      continue
+    }
+    // 不在引号内
+    if (ch === '"') {
+      inQuotes = true
+      i++
+      continue
+    }
+    if (ch === ',') {
+      row.push(field)
+      field = ''
+      i++
+      continue
+    }
+    if (ch === '\r') {
+      i++
+      continue
+    }
+    if (ch === '\n') {
+      row.push(field)
+      rows.push(row)
+      row = []
+      field = ''
+      i++
+      continue
+    }
+    field += ch
+    i++
+  }
+  // 最后一个字段/行
+  if (field.length > 0 || row.length > 0) {
+    row.push(field)
+    rows.push(row)
+  }
+  return rows.filter((r) => r.some((c) => c.trim() !== '') || r.length > 1)
+}
+
+/** 解析 Markdown 表格 → string[][]。识别 GFM 表格（| a | b | + 分隔行 |---|---|）。 */
+export function parseMarkdownTable(md: string): string[][] {
+  const lines = md.split('\n')
+  const tableLines: string[] = []
+  let foundSeparator = false
+  for (const line of lines) {
+    const trimmed = line.trim()
+    if (trimmed.includes('|')) {
+      // 分隔行：|---|---| 或 | --- | :---:
+      if (/^\|?[\s:]*-{2,}[\s:|-]*\|?\s*$/.test(trimmed)) {
+        foundSeparator = true
+        continue
+      }
+      tableLines.push(trimmed)
+    } else if (foundSeparator) {
+      break // 表格结束
+    }
+  }
+  if (!foundSeparator || tableLines.length === 0) return []
+  return tableLines.map((line) => {
+    // 去首尾 |，按 | 切，trim 每格
+    const inner = line.replace(/^\|/, '').replace(/\|$/, '')
+    return inner.split('|').map((c) => c.trim())
+  })
+}
+
+/** 表格中间表示 → 目标格式。async 因 buildXlsx 需动态 import xlsx。 */
+async function convertFromTable(table: string[][], to: TargetFormat): Promise<string | Buffer> {
+  switch (to) {
+    case 'csv':
+      return buildCsv(table)
+    case 'xlsx':
+      return await buildXlsx(table)
+    case 'md':
+      return tableToMarkdown(table)
+    case 'txt':
+      // txt：制表符分隔的纯文本（TSV 风格）
+      return table.map((row) => row.join('\t')).join('\n')
+    case 'html':
+      return fullHtml(tableToHtml(table))
+    default:
+      throw new Error(`表格不支持转成 ${to}`)
+  }
+}
+
+/** 表格 → CSV 字符串（含引号转义）。 */
+function buildCsv(table: string[][]): string {
+  return (
+    table
+      .map((row) =>
+        row
+          .map((cell) => {
+            // 含逗号/引号/换行 的格子要引号包裹，内部引号双写
+            if (/[",\n\r]/.test(cell)) return `"${cell.replace(/"/g, '""')}"`
+            return cell
+          })
+          .join(','),
+      )
+      .join('\n') + '\n'
+  )
+}
+
+/** 表格 → xlsx Buffer（SheetJS）。 */
+async function buildXlsx(table: string[][]): Promise<Buffer> {
+  const XLSX = await import('xlsx')
+  const ws = XLSX.utils.aoa_to_sheet(table)
+  const wb = XLSX.utils.book_new()
+  XLSX.utils.book_append_sheet(wb, ws, 'Sheet1')
+  return XLSX.write(wb, { type: 'buffer', bookType: 'xlsx' }) as Buffer
+}
+
+/** 表格 → Markdown 表格（含分隔行）。 */
+function tableToMarkdown(table: string[][]): string {
+  if (table.length === 0) return ''
+  const colCount = Math.max(...table.map((r) => r.length))
+  const norm = table.map((r) => {
+    const padded = [...r, ...Array(colCount - r.length).fill('')]
+    return padded.slice(0, colCount)
+  })
+  const header = `| ${norm[0].join(' | ')} |`
+  const sep = `| ${norm[0].map(() => '---').join(' | ')} |`
+  const body = norm.slice(1).map((r) => `| ${r.join(' | ')} |`).join('\n')
+  return [header, sep, body].filter(Boolean).join('\n') + '\n'
+}
+
+/** 表格 → HTML <table>（不含 fullHtml 包裹，convertFromTable 的 html case 会再包一层 fullHtml）。 */
+function tableToHtml(table: string[][]): string {
+  if (table.length === 0) return '<p><em>空表格</em></p>'
+  const [head, ...body] = table
+  const thead = `<thead><tr>${head.map((c) => `<th>${escapeHtml(c)}</th>`).join('')}</tr></thead>`
+  const tbody =
+    body.length > 0
+      ? `<tbody>${body.map((r) => `<tr>${r.map((c) => `<td>${escapeHtml(c)}</td>`).join('')}</tr>`).join('')}</tbody>`
+      : ''
+  return `<table>${thead}${tbody}</table>`
+}
+
+function escapeHtml(s: string): string {
+  return s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
+}
+
+/**
+ * 解析 CSV 为表格（渲染层预览用，V-Z9 CSV 预览）。
+ * 导出给 IPC handler 调，返回行列结构供前端渲染。
+ */
+export function csvToTable(text: string): string[][] {
+  return parseCsv(text)
 }

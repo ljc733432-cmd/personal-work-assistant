@@ -196,12 +196,22 @@ write_file 覆盖已存在文件时，FC 循环**挂起**：返回 `{kind:'confi
 - **双轨**：A 轨 `create_note/search_notes/read_note/update_note`（update 走二次确认，覆盖原内容）；B 轨笔记页 CRUD。
 - **不要叫**："备忘录"/"文档"——Notes 特指本地 .md 笔记库。
 
-### **Document Converter（文档转换，v1.2 工具 3）**
-格式转换（PRD §13.2）。`{inputPath, targetFormat, outputPath?}`。
-- **支持矩阵**：md↔txt、md→html/docx/pdf、docx→md/txt/html。
+### **Document Converter（文档转换，v1.2 工具 3 + v1.20 表格扩展）**
+格式转换（PRD §13.2 + §15.4⑨）。`{inputPath, targetFormat, outputPath?}`。
+- **支持矩阵**：md↔txt、md→html/docx/pdf、docx→md/txt/html、**md↔csv/xlsx、csv↔xlsx（v1.20 表格互转）**。
 - **PDF 生成**：pdfkit + 系统字体 `simhei.ttf`（TV-4 验证；pdfkit 不支持 .ttc）。
-- **安全**：输入输出路径经 `resolveSafePath`（白名单/笔记库）。
+- **表格中间表示**（v1.20）：`string[][]`（行×列）。csv/xlsx/md表格 都先转成它，再转目标格式——单一数据模型。
+- **CSV 解析**：手写状态机（引号包裹/逗号/换行/引号双写转义），零依赖。
+- **xlsx**：SheetJS（`xlsx` 包）动态 import，纯 JS 无 native，打包零配置。
+- **安全**：输入路径经 `resolveSafePath`，**needsConfirm 放行**（输入来自 pickFile 用户主动选，显式授权；v1.20 修 v1.2 遗留 bug）。
 - **无破坏性**：原文件不动，输出到同目录换扩展名。不走二次确认。
+
+### **TableConvert（表格互转，v1.20，PRD §15.4⑨ V-Z9）**
+csv/xlsx/md 表格的双向转换 + CSV 预览。**并入 Document Converter**（非独立工具，PRD 原话）。
+- **中间表示**：`string[][]`。csv→parseCsv、xlsx→readXlsxAsTable、md→parseMarkdownTable 都产它；buildCsv/buildXlsx/tableToMarkdown/tableToHtml 从它产目标。
+- **转换矩阵**：md→csv/xlsx（解析 GFM `| a | b |`）/ csv→md/txt/html/xlsx / xlsx→csv/md/txt/html / csv↔xlsx。
+- **CSV 预览**（V-Z9 验收项）：选 csv/xlsx 后显示前 50 行（首行高亮），`convert:preview_table` IPC 读文件返 string[][]。
+- **不要叫**："表格工具/Excel 编辑器"——TableConvert 特指格式互转（不能编辑单元格内容）。
 
 ### **PdfToolbox（PDF 工具箱，v1.7 工具，PRD §15.4⑥）**
 纯客户端 PDF 页面操作（pdf-lib）。**区别于 Converter**：Converter 是格式转换（md→pdf 生成），PdfToolbox 是已有 PDF 的页面操作。

@@ -273,7 +273,7 @@ export interface NoteSearchHit {
 
 // ---------- Document Converter（M12.9 v1.2 工具扩展） ----------
 // 见 PRD §13.2 工具 3 + §15.5。
-export type ConvertTarget = 'md' | 'txt' | 'html' | 'docx' | 'pdf'
+export type ConvertTarget = 'md' | 'txt' | 'html' | 'docx' | 'pdf' | 'csv' | 'xlsx'
 
 export interface ConvertParams {
   inputPath: string

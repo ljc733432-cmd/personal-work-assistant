@@ -55,6 +55,7 @@ const ALLOWED_INVOKE = [
   'convert:targets',        // 查转换支持的目标格式（M12.9 v1.2）
   'convert:run',            // 执行文档转换
   'convert:pickFile',       // 选输入文件（dialog）
+  'convert:preview_table',  // 表格预览：读 csv/xlsx → string[][]（v1.20 V-Z9）
   'pdf:info',               // PDF 工具箱：查页数（v1.7 M16）
   'pdf:merge',              // PDF 工具箱：合并
   'pdf:extract',            // PDF 工具箱：提取页

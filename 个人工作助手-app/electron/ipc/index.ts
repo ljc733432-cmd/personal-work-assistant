@@ -42,8 +42,9 @@ import {
   searchNotes,
 } from '../services/notes/noteStore'
 import { getNotesDir, setNotesDir, ensureNotesDir } from '../services/notes/config'
+import { resolveSafePath } from '../services/fileTools'
 import fs from 'node:fs'
-import { convertDocument, supportedTargets } from '../services/converter'
+import { convertDocument, supportedTargets, parseCsv, readXlsxAsTable } from '../services/converter'
 import { getPdfInfo, mergePdfs, extractPages, splitPdf } from '../services/pdfToolbox'
 import { chatWithProvider, type ChatResult } from '../services/providers/chat'
 import { truncateByTokenBudget } from '../services/providers/truncate'
@@ -1329,7 +1330,7 @@ function registerConverterHandlers() {
       const result = await dialog.showOpenDialog(win!, {
         properties: ['openFile'],
         filters: [
-          { name: '文档', extensions: ['md', 'txt', 'docx'] },
+          { name: '文档', extensions: ['md', 'txt', 'docx', 'csv', 'xlsx'] },
           { name: '所有文件', extensions: ['*'] },
         ],
       })
@@ -1339,6 +1340,40 @@ function registerConverterHandlers() {
       return err(String(e))
     }
   })
+
+  // v1.20 表格预览（V-Z9）：读 csv/xlsx 文件 → string[][] 返前端渲染。路径经 resolveSafePath
+  ipcMain.handle(
+    'convert:preview_table',
+    async (_, filePath: string): Promise<IpcResult<string[][]>> => {
+      try {
+        // 构建最小 sources（workDirs + 笔记库），照搬 chat:send 的 buildSources 简化版
+        const sources: AccessibleDir[] = listEnabledWorkDirs().map((wd) => ({
+          label: wd.label,
+          path: wd.path,
+          source: 'workdir' as const,
+          mode: wd.mode,
+        }))
+        try {
+          sources.push({ label: '笔记库', path: getNotesDir(), source: 'workdir', mode: 'readwrite' })
+        } catch {
+          // notesDir 取不到忽略
+        }
+        const r = resolveSafePath(filePath, sources)
+        if (!r.ok || !r.fullPath) return err(r.error ?? '输入路径非法')
+        const ext = path.extname(r.fullPath).slice(1).toLowerCase()
+        if (ext === 'csv') {
+          const text = fs.readFileSync(r.fullPath, 'utf8')
+          return ok(parseCsv(text))
+        }
+        if (ext === 'xlsx') {
+          return ok(await readXlsxAsTable(r.fullPath))
+        }
+        return err('预览仅支持 csv / xlsx')
+      } catch (e) {
+        return err(String(e))
+      }
+    },
+  )
 }
 
 // ---------- PDF Toolbox handlers（v1.7 M16，PRD §15.4⑥） ----------

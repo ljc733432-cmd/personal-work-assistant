@@ -760,8 +760,8 @@ function makeConvertDocumentTool(): ToolRegistration {
       function: {
         name: 'convert_document',
         description:
-          '转换文档格式。支持 md↔txt、md→html/docx/pdf、docx→md/txt/html。' +
-          '当用户说「把这份 md 转成 docx/pdf」时调用。路径须在工作目录或笔记库内。',
+          '转换文档格式。支持 md↔txt、md→html/docx/pdf、docx→md/txt/html、md↔csv/xlsx、csv↔xlsx（表格互转）。' +
+          '当用户说「把这份 md 转成 docx/pdf」「表格转成 Excel」时调用。路径须在工作目录或笔记库内。',
         parameters: {
           type: 'object',
           properties: {
@@ -771,7 +771,7 @@ function makeConvertDocumentTool(): ToolRegistration {
             },
             targetFormat: {
               type: 'string',
-              enum: ['md', 'txt', 'html', 'docx', 'pdf'],
+              enum: ['md', 'txt', 'html', 'docx', 'pdf', 'csv', 'xlsx'],
               description: '目标格式',
             },
             outputPath: {
@@ -785,9 +785,9 @@ function makeConvertDocumentTool(): ToolRegistration {
     },
     handler: async (args) => {
       const inputPath = String(args.inputPath ?? '').trim()
-      const targetFormat = String(args.targetFormat ?? '').trim() as 'md' | 'txt' | 'html' | 'docx' | 'pdf'
+      const targetFormat = String(args.targetFormat ?? '').trim() as 'md' | 'txt' | 'html' | 'docx' | 'pdf' | 'csv' | 'xlsx'
       if (!inputPath) return { kind: 'result', value: JSON.stringify({ error: 'inputPath 不能为空' }) }
-      if (!['md', 'txt', 'html', 'docx', 'pdf'].includes(targetFormat)) {
+      if (!['md', 'txt', 'html', 'docx', 'pdf', 'csv', 'xlsx'].includes(targetFormat)) {
         return { kind: 'result', value: JSON.stringify({ error: 'targetFormat 非法' }) }
       }
       const result = await convertDocument({

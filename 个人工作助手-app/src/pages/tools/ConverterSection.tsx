@@ -19,6 +19,8 @@ const ALL_TARGETS: { value: ConvertTarget; label: string }[] = [
   { value: 'html', label: 'HTML' },
   { value: 'docx', label: 'Word' },
   { value: 'pdf', label: 'PDF' },
+  { value: 'csv', label: 'CSV' },
+  { value: 'xlsx', label: 'Excel' },
 ]
 
 type Status =
@@ -32,10 +34,13 @@ export function ConverterSection({ onBack }: { onBack: () => void }) {
   const [targets, setTargets] = useState<ConvertTarget[]>([])
   const [target, setTarget] = useState<ConvertTarget | ''>('')
   const [status, setStatus] = useState<Status>({ kind: 'idle' })
+  // v1.20 表格预览（V-Z9）：csv/xlsx 输入时显示前 N 行
+  const [previewTable, setPreviewTable] = useState<string[][] | null>(null)
 
-  // 输入文件扩展名变化 → 查支持的目标格式
+  // 输入文件扩展名变化 → 查支持的目标格式 + csv/xlsx 时拉表格预览
   useEffect(() => {
-    const ext = inputPath.split('.').pop() ?? ''
+    const ext = inputPath.split('.').pop()?.toLowerCase() ?? ''
+    setPreviewTable(null)
     if (!ext) {
       setTargets([])
       setTarget('')
@@ -44,13 +49,18 @@ export function ConverterSection({ onBack }: { onBack: () => void }) {
     invoke<ConvertTarget[]>('convert:targets', ext)
       .then((list) => {
         setTargets(list)
-        // 默认选第一个
         setTarget(list[0] ?? '')
       })
       .catch(() => {
         setTargets([])
         setTarget('')
       })
+    // csv/xlsx → 预览前 50 行
+    if (ext === 'csv' || ext === 'xlsx') {
+      invoke<string[][]>('convert:preview_table', inputPath)
+        .then((rows) => setPreviewTable(rows.slice(0, 50)))
+        .catch(() => setPreviewTable(null))
+    }
   }, [inputPath])
 
   const handlePick = async () => {
@@ -105,10 +115,34 @@ export function ConverterSection({ onBack }: { onBack: () => void }) {
             ) : (
               <Button variant="outline" onClick={handlePick} className="w-full gap-1.5 border-dashed">
                 <FileText size={14} />
-                选择要转换的文件（md / txt / docx）
+                选择要转换的文件（md / txt / docx / csv / xlsx）
               </Button>
             )}
           </div>
+
+          {/* 表格预览（csv/xlsx 输入时，V-Z9）*/}
+          {previewTable && previewTable.length > 0 && (
+            <div className="space-y-2 border border-border bg-card p-4">
+              <div className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
+                表格预览（前 {Math.min(50, previewTable.length)} 行 / 共 {previewTable.length === 50 ? '50+' : previewTable.length} 行）
+              </div>
+              <div className="max-h-60 overflow-auto rounded border border-border">
+                <table className="w-full border-collapse text-xs">
+                  <tbody>
+                    {previewTable.map((row, ri) => (
+                      <tr key={ri} className={ri === 0 ? 'bg-accent/5 font-medium' : ''}>
+                        {row.map((cell, ci) => (
+                          <td key={ci} className="border-r border-b border-border px-2 py-1 whitespace-nowrap">
+                            {cell}
+                          </td>
+                        ))}
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+          )}
 
           {/* 步骤 2：选目标格式 */}
           {inputPath && (
@@ -117,7 +151,7 @@ export function ConverterSection({ onBack }: { onBack: () => void }) {
                 第 2 步 · 选择目标格式
               </div>
               {targets.length === 0 ? (
-                <div className="text-sm text-warning">此文件格式不支持转换（支持 md / txt / docx 输入）</div>
+                <div className="text-sm text-warning">此文件格式不支持转换（支持 md / txt / docx / csv / xlsx 输入）</div>
               ) : (
                 <div className="flex flex-wrap gap-2">
                   {ALL_TARGETS.filter((t) => targets.includes(t.value)).map((t) => (
