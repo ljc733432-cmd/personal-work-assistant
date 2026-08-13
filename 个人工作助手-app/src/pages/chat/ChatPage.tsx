@@ -8,6 +8,7 @@ import { useProvidersStore } from '@/stores/providers'
 import { useChatStore } from '@/stores/chat'
 import { useTasksStore } from '@/stores/tasks'
 import { useTiersStore } from '@/stores/tiers'
+import { useScreenshotStore } from '@/stores/screenshot'
 import { ConversationList } from './ConversationList'
 import { DraftCard } from './DraftCard'
 import { invoke, on, send } from '@/lib/ipc'
@@ -73,6 +74,17 @@ export function ChatPage() {
   useEffect(() => {
     refresh()
   }, [refresh])
+
+  // v1.19：订阅截图标注 store。截图页「插入当前对话」push 后，这里 merge 进 pendingImages
+  // 并 consume 清空。ChatPage 常驻挂载（v1.17.1），订阅式保证切回对话页能看到图。
+  const pendingFromScreenshot = useScreenshotStore((s) => s.pendingForChat)
+  const consumeForChat = useScreenshotStore((s) => s.consumeForChat)
+  useEffect(() => {
+    if (pendingFromScreenshot.length > 0) {
+      setPendingImages((prev) => [...prev, ...pendingFromScreenshot])
+      consumeForChat()
+    }
+  }, [pendingFromScreenshot, consumeForChat])
 
   // M4-Step7：读自动抽取配置（mount 时读一次，设置页改了重开生效）
   useEffect(() => {

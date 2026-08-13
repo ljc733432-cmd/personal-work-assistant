@@ -1,18 +1,19 @@
 import { useState } from 'react'
-import { Bell, Timer, FileText, ArrowLeft, FilePdf, ClipboardText, Graph } from '@/components/ui/icons'
+import { Bell, Timer, FileText, ArrowLeft, FilePdf, ClipboardText, Graph, Screenshot } from '@/components/ui/icons'
 import { cn } from '@/lib/utils'
 import { ReminderSection } from './ReminderSection'
 import { ConverterSection } from './ConverterSection'
 import { PdfToolbox } from './PdfToolbox'
 import { ReportToolbox } from './ReportToolbox'
 import { MindmapToolbox } from './MindmapToolbox'
+import { ScreenshotToolbox } from './ScreenshotToolbox'
 
 /**
  * 工具页（M12.5~M12.9 v1.2 + M16 v1.7 + M17 v1.8 + v1.12 思维导图）。
  * PRD §12.3：卡片网格入口 → 点进具体工具。
  * v1.2 四基础工具 + v1.7 PDF 工具箱 + v1.8 AI 日报/周报 + v1.12 AI 思维导图。
  */
-type Tool = 'reminders' | 'pomodoro' | 'converter' | 'pdf' | 'report' | 'mindmap' | null
+type Tool = 'reminders' | 'pomodoro' | 'converter' | 'pdf' | 'report' | 'mindmap' | 'screenshot' | null
 
 export function ToolsPage() {
   const [active, setActive] = useState<Tool>(null)
@@ -31,6 +32,9 @@ export function ToolsPage() {
   }
   if (active === 'mindmap') {
     return <MindmapToolbox onBack={() => setActive(null)} />
+  }
+  if (active === 'screenshot') {
+    return <ScreenshotToolbox onBack={() => setActive(null)} />
   }
 
   return (
@@ -76,6 +80,12 @@ export function ToolsPage() {
             title="AI 思维导图"
             desc="主题/素材生成可交互导图"
             onClick={() => setActive('mindmap')}
+          />
+          <ToolCard
+            icon={Screenshot}
+            title="截图标注"
+            desc="桌面截屏 + 画笔/箭头标注"
+            onClick={() => setActive('screenshot')}
           />
         </div>
       </div>

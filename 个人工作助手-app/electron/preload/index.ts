@@ -75,6 +75,9 @@ const ALLOWED_INVOKE = [
   'mindmap:cancel',         // 取消进行中的思维导图生成（v1.12）
   'note:ai',                // AI 笔记助手：摘要/待办/提问/续写（v1.9 M18）
   'note:ai_cancel',         // 取消进行中的笔记 AI 操作（v1.9 M18）
+  'screen:capture',         // 截图标注：desktopCapturer 截整屏，返 dataUrl（v1.19 PRD §15.4⑧）
+  'screen:save',            // 截图标注：保存标注图到笔记库 images/（照搬 note:save_image）
+  'screen:copy_clipboard',  // 截图标注：复制标注图到系统剪贴板（clipboard.writeImage）
 ] as const
 
 const ALLOWED_SEND = [

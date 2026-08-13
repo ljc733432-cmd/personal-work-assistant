@@ -212,6 +212,17 @@ write_file 覆盖已存在文件时，FC 循环**挂起**：返回 `{kind:'confi
 - **安全**：路径经 `resolveSafePath`（照搬 converter）。
 - **不要叫**："PDF 转换"——会与 Converter 混淆；PdfToolbox 特指页面操作。
 
+### **ScreenshotAnnotation（截图标注，v1.19，PRD §15.4⑧ 收官）**
+桌面截屏 + 原生 canvas 标注的工具。§15.4 文档/文件增强组最后一个（⑥PDF/⑦OCR/⑧截图标注全齐）。
+- **形态**：工具页内嵌（不做全屏遮罩/快捷键）。进工具页点「截取屏幕」→ 主进程 desktopCapturer 截整屏 → 返 dataUrl → 页内 canvas 标注 → 三去向。
+- **截屏在主进程调**（ADR-026）：安全三件套（contextIsolation+nodeIntegration:false+sandbox:true）下渲染层拿不到 desktopCapturer，必须走 `screen:capture` IPC。`screenShot.ts` 的 `captureScreen()` 用 `getSources({types:['screen']})`。
+- **标注用原生 canvas**（PRD §15.5 硬约束，不上 fabric/konva）：shape 数据结构 `{type:'rect'|'arrow'|'pen'|'text', ...}`，重绘 = clearRect + drawImage 底图 + 正序重放 shapes。
+- **四件套 + 撤销**：矩形框/箭头/文字/画笔（自由曲线）+ 撤销（无重做）。画笔替代马赛克（像素采样复杂）。颜色统一电光蓝 accent。
+- **三去向**：复制剪贴板（`clipboard.writeImage` 主进程 IPC，项目首次用）/ 保存到笔记库 images/（照搬 note:save_image）/ 插入当前对话（跨页 store 中转）。
+- **跨页 store 订阅式**：`src/stores/screenshot.ts` 的 `pendingForChat` + push/consume。ChatPage useEffect 订阅变化 merge 进 pendingImages。因 ChatPage 常驻挂载（v1.17.1）必须订阅式。
+- **多显示器限制**：Chromium 无法整屏拼接多屏，仅截主屏（getPrimaryDisplay），UI 文字提示。
+- **不要叫**："截屏工具/截图软件"——ScreenshotAnnotation 特指本应用的截屏+canvas标注工具。
+
 ### **语义色 token（Semantic Color Token，v1.2 UI）**
 取代散落的 Tailwind 原生色类（`bg-blue-100` 等）。见 PRD §12.2.1 + 验收 V-O。
 - `--success`（完成/通过）/ `--warning`（草稿/警示）/ `--danger`（错误/危险）/ `--info`（信息提示，同 accent）。
@@ -376,3 +387,4 @@ PRD §7 验收优先级。P0 必做 = v1 完成；P1 可选。
 | finishTime / doneAt | **completedAt**（v1.8 任务完成时间戳，与 status='done' 语义对齐） |
 | 排序 / 分类 / 看板 | **智能分组展示（Smart Grouping）**（v1.10.8 任务页按维度自动分区块） |
 | 分类 / 目录 | **Task Tag（任务标签）**（v1.11 横向多对多）/ **Task Project**（v1.13 纵向归属，一对一） |
+| 截屏工具 / 截图软件 | **ScreenshotAnnotation**（v1.19 截屏+原生canvas标注工具，区别于系统截屏） |

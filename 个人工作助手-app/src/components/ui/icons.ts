@@ -53,4 +53,13 @@ export {
   GraphIcon as Graph, // 思维导图（v1.12 网络/分支结构语义）
   TextAlignLeftIcon as TextAlignLeft, // 大纲（v1.15 笔记大纲侧栏）
   ImageSquareIcon as ImageSquare, // 图片（v1.17 笔记/对话贴图）
+  ScreencastIcon as Screenshot, // 截图标注（v1.19 PRD §15.4⑧，Phosphor 无 ScreenshotIcon，用 Screencast）
+  CursorIcon as MousePointer, // 选择工具（v1.19.3 截图标注对象编辑，Phosphor 叫 Cursor）
+  FrameCornersIcon as FrameCorners, // 矩形框工具（v1.19 截图标注）
+  ArrowUpIcon as ArrowUp, // 箭头工具（v1.19 截图标注）
+  TextTIcon as TextT, // 文字工具（v1.19 截图标注）
+  PaintBrushIcon as PaintBrush, // 画笔工具（v1.19 截图标注）
+  EraserIcon as Eraser, // 清空（v1.19 截图标注）
+  CopySimpleIcon as CopySimple, // 复制（v1.19 截图标注）
+  ChatTeardropDotsIcon as ChatTeardropDots, // 插入对话（v1.19 截图标注）
 } from '@phosphor-icons/react'

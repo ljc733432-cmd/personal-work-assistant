@@ -1,4 +1,4 @@
-import { ipcMain, BrowserWindow } from 'electron'
+import { ipcMain, BrowserWindow, clipboard, nativeImage } from 'electron'
 import { randomUUID } from 'node:crypto'
 import path from 'node:path'
 import { eq, desc, and, gte, lte, sql, inArray } from 'drizzle-orm'
@@ -53,6 +53,7 @@ import { resolveProviderId } from '../services/providers/router'
 import { extractTasks } from '../services/taskExtractor'
 import { generateReport } from '../services/reportGenerator'
 import { assistNote } from '../services/noteAssistant'
+import { captureScreen, type ScreenCaptureResult } from '../services/screenShot'
 import { generateMindmap } from '../services/mindmapGenerator'
 import { assembleTools, type ToolContext } from '../services/tools'
 import { getSystemDirs, type AccessibleDir } from '../services/systemDirs'
@@ -1867,6 +1868,59 @@ function registerMetaHandlers() {
   ipcMain.handle('meta:provider-presets', () => ok(PROVIDER_PRESETS))
 }
 
+// ---------- v1.19 截图标注 handlers（PRD §15.4⑧ 收官） ----------
+// 截屏用 desktopCapturer（主进程调，sandbox 限制渲染层用不了）；
+// 保存照搬 note:save_image 落盘到笔记库 images/（路径应用自决，不经 resolveSafePath）；
+// 复制剪贴板用 clipboard.writeImage（项目首次用主进程剪贴板写图）。
+function registerScreenHandlers() {
+  // 截取整屏，返 dataUrl + 原图尺寸
+  ipcMain.handle('screen:capture', async (): Promise<IpcResult<ScreenCaptureResult>> => {
+    try {
+      return ok(await captureScreen())
+    } catch (e) {
+      return err(String(e))
+    }
+  })
+
+  // 保存标注图到笔记库 images/（照搬 note:save_image 范式）
+  // 入参 {dataUrl}，返 markdown 相对引用路径 images/xxx.png
+  ipcMain.handle(
+    'screen:save',
+    (_, params: { dataUrl: string }): IpcResult<{ relPath: string }> => {
+      try {
+        const m = /^data:image\/(\w+);base64,(.+)$/.exec(params.dataUrl)
+        if (!m) return err('无效的图片 dataUrl（期望 data:image/xxx;base64,...）')
+        const ext = m[1] === 'jpeg' ? 'jpg' : m[1]
+        const buf = Buffer.from(m[2], 'base64')
+        const notesDir = ensureNotesDir()
+        const imagesDir = path.join(notesDir, 'images')
+        fs.mkdirSync(imagesDir, { recursive: true })
+        const fileName = `${Date.now()}-${Math.random().toString(36).slice(2, 8)}.${ext}`
+        fs.writeFileSync(path.join(imagesDir, fileName), buf)
+        return ok({ relPath: `images/${fileName}` })
+      } catch (e) {
+        return err(String(e))
+      }
+    },
+  )
+
+  // 复制标注图到系统剪贴板
+  ipcMain.handle(
+    'screen:copy_clipboard',
+    (_, params: { dataUrl: string }): IpcResult<true> => {
+      try {
+        const m = /^data:image\/(\w+);base64,(.+)$/.exec(params.dataUrl)
+        if (!m) return err('无效的图片 dataUrl')
+        const buf = Buffer.from(m[2], 'base64')
+        clipboard.writeImage(nativeImage.createFromBuffer(buf))
+        return ok(true)
+      } catch (e) {
+        return err(String(e))
+      }
+    },
+  )
+}
+
 export function registerIpcHandlers() {
   registerProviderHandlers()
   registerSettingsHandlers()
@@ -1884,6 +1938,7 @@ export function registerIpcHandlers() {
   registerDashboardHandlers()
   registerReportHandlers()
   registerMindmapHandlers()
+  registerScreenHandlers()
   registerMetaHandlers()
   logInfo('[ipc] handlers registered')
 }
