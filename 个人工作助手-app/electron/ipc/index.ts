@@ -30,6 +30,7 @@ import {
   getConversation,
   listMessages,
   listMessagesInRange,
+  searchMessages,
 } from '../services/conversation/factory'
 import { listSearchProviders, getActiveSearchConfig } from '../services/search/factory'
 import { pingTavily } from '../services/searchTools'
@@ -90,6 +91,7 @@ import type {
   ConversationInput,
   ConversationMessage,
   MessageInsertInput,
+  MessageSearchHit,
   MessageToolCall,
   ActivityPoint,
   ActivityQuery,
@@ -1868,6 +1870,15 @@ function registerConversationHandlers() {
       }
     },
   )
+
+  // v1.22 对话搜索：跨会话 LIKE 查消息内容，返命中项（含会话标题 + snippet）
+  ipcMain.handle('message:search', (_, query: string): IpcResult<MessageSearchHit[]> => {
+    try {
+      return ok(searchMessages(query))
+    } catch (e) {
+      return err(String(e))
+    }
+  })
 
   // 写单条消息（供 chat:send 落库 + 未来 M4 抽取回灌用）。
   // 注意：流式 token 不逐条写库，由 chat:send 在 done 前用此接口一次性落 assistant 最终文本。

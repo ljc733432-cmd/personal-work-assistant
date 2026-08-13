@@ -27,6 +27,10 @@ interface TasksState {
   promoteSubtask: (id: string) => Promise<void>
   /** v1.10.5：移动任务到某父任务下（parentId=null 变根任务）。 */
   setParent: (id: string, parentId: string | null) => Promise<void>
+  /** v1.22 批量改任务（状态/优先级/标签等）。循环 upsert 后单次 refresh（避免 N 次 list）。 */
+  batchUpsert: (inputs: TaskInput[]) => Promise<void>
+  /** v1.22 批量删任务。循环 delete 后单次 refresh。 */
+  batchDelete: (ids: string[]) => Promise<void>
 }
 
 export const useTasksStore = create<TasksState>((set) => ({
@@ -85,6 +89,20 @@ export const useTasksStore = create<TasksState>((set) => ({
 
   setParent: async (id, parentId) => {
     await invoke<true>('task:set_parent', { id, parentId })
+    const list = await invoke<Task[]>('task:list')
+    set({ tasks: list })
+  },
+
+  batchUpsert: async (inputs) => {
+    // 并发 upsert（每个带 id 走更新分支，未传字段服务端用 existing 兜底）
+    await Promise.all(inputs.map((input) => invoke<Task>('task:upsert', input)))
+    const list = await invoke<Task[]>('task:list')
+    set({ tasks: list })
+  },
+
+  batchDelete: async (ids) => {
+    // task:delete 服务端已内置递归删后代，单个删根任务不留孤儿
+    await Promise.all(ids.map((id) => invoke<true>('task:delete', { id, cascade: true })))
     const list = await invoke<Task[]>('task:list')
     set({ tasks: list })
   },

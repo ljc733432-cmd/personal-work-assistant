@@ -223,6 +223,16 @@ export interface NoteSearchHit {
   updatedAt: number
 }
 
+/** v1.22 对话搜索命中项 */
+export interface MessageSearchHit {
+  messageId: string
+  conversationId: string
+  conversationTitle: string
+  role: string
+  snippet: string
+  createdAt: number
+}
+
 // ---------- Document Converter（M12.9 v1.2 工具扩展） ----------
 export type ConvertTarget = 'md' | 'txt' | 'html' | 'docx' | 'pdf' | 'csv' | 'xlsx'
 

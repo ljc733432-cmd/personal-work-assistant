@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from 'react'
 import type { ReactNode } from 'react'
-import { Check, Plus, CheckSquare, CaretDown, CaretRight, ArrowRight, Pencil, AlertCircle, Sun, Bell, CheckCircle2 } from '@/components/ui/icons'
+import { Check, Plus, CheckSquare, CaretDown, CaretRight, ArrowRight, Pencil, AlertCircle, Sun, Bell, CheckCircle2, Trash2, X } from '@/components/ui/icons'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
@@ -10,6 +10,7 @@ import { EmptyState } from '@/components/ui/EmptyState'
 import { useTasksStore } from '@/stores/tasks'
 import { isLogicallyDone } from '@/lib/taskStatus'
 import { invoke } from '@/lib/ipc'
+import { cn } from '@/lib/utils'
 import type { Task, TaskInput, TaskPriority, TaskStatus } from '@/types'
 
 // ---------- 状态/优先级 显示映射 ----------
@@ -123,7 +124,7 @@ function groupByPriority(undone: Task[]): TaskGroup[] {
 }
 
 export function TasksPage() {
-  const { tasks, refresh, upsert, remove, createSubtask, promoteSubtask, setParent } = useTasksStore()
+  const { tasks, refresh, upsert, remove, createSubtask, promoteSubtask, setParent, batchUpsert, batchDelete } = useTasksStore()
   const [filter, setFilter] = useState<Filter>('all')
   // v1.10.8：分组维度，默认按截止日
   // v1.18：偏好持久化到 settings KV tasks.groupBy，切回任务页记住上次选择
@@ -137,6 +138,42 @@ export function TasksPage() {
   const [tagFilter, setTagFilter] = useState<string | 'all' | null>('all')
   // v1.11：标签字典（最近用过的标签，settings KV tasks.tagDict，最多 50 个）
   const [tagDict, setTagDict] = useState<string[]>(EMPTY_TAGS)
+  // v1.22 批量操作：selectMode 时每张卡显示 checkbox，selectedIds 存选中的任务 id
+  const [selectMode, setSelectMode] = useState(false)
+  const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set())
+
+  const toggleSelect = (id: string) => {
+    setSelectedIds((prev) => {
+      const next = new Set(prev)
+      if (next.has(id)) next.delete(id)
+      else next.add(id)
+      return next
+    })
+  }
+  const exitSelectMode = () => {
+    setSelectMode(false)
+    setSelectedIds(new Set())
+  }
+  const selectAllFiltered = (ids: string[]) => {
+    setSelectedIds(new Set(ids))
+  }
+
+  /** v1.22 批量改状态/优先级：从 tasks 查每个选中任务的当前 title（upsert 更新分支强制写 title） */
+  const batchUpdateField = async (field: 'status' | 'priority', value: string) => {
+    if (selectedIds.size === 0) return
+    const inputs = tasks
+      .filter((t) => selectedIds.has(t.id))
+      .map((t) => ({ id: t.id, title: t.title, [field]: value }))
+    await batchUpsert(inputs as Parameters<typeof batchUpsert>[0])
+    exitSelectMode()
+  }
+  /** v1.22 批量删除 */
+  const handleBatchDelete = async () => {
+    if (selectedIds.size === 0) return
+    if (!confirm(`批量删除 ${selectedIds.size} 个任务？含子任务的会级联删除子任务，不可恢复。`)) return
+    await batchDelete([...selectedIds])
+    exitSelectMode()
+  }
 
   useEffect(() => {
     refresh()
@@ -182,6 +219,9 @@ export function TasksPage() {
     }
   }
 
+  // v1.22：标签字典管理——删除不在用的标签（被任务引用的不让删）
+  const [tagManageOpen, setTagManageOpen] = useState(false)
+
   // v1.10.1 A1：删根任务，有子任务时 confirm 级联删
   const handleDeleteRoot = (task: Task, subCount: number) => {
     if (subCount > 0) {
@@ -223,6 +263,34 @@ export function TasksPage() {
   }, [tasks])
 
   const rootTasks = useMemo(() => tasks.filter((t) => t.parentId === null), [tasks])
+
+  // v1.22 标签字典管理（放 rootTasks 后避免 TDZ：isTagInUse 引用 rootTasks）
+  /** 检查标签是否被根任务使用（与筛选条口径一致：子任务不独立计数，只看根任务） */
+  const isTagInUse = (tag: string): boolean => rootTasks.some((t) => (t.tags ?? []).includes(tag))
+  /** 从字典删除标签（仅未被根任务使用的可删）。同时清理所有任务上残留的同名标签。 */
+  const deleteTagFromDict = async (tag: string) => {
+    if (isTagInUse(tag)) {
+      alert(`标签「${tag}」仍被根任务使用，无法删除。请先从所有任务移除该标签。`)
+      return
+    }
+    // 1. 字典删除
+    const trimmed = tagDict.filter((t) => t !== tag)
+    setTagDict(trimmed)
+    await invoke<true>('settings:set', 'tasks.tagDict', JSON.stringify(trimmed))
+    // 2. 清理所有任务（含子任务）上残留的同名标签（根任务已被 isTagInUse 拦住，子任务可能还有）
+    const affected = tasks.filter((t) => (t.tags ?? []).includes(tag))
+    if (affected.length > 0) {
+      await batchUpsert(affected.map((t) => ({ id: t.id, title: t.title, tags: (t.tags ?? []).filter((x) => x !== tag) })))
+    }
+    // 3. 若当前筛选正指向被删标签，回退到全部（tagFilter 守护 effect 也会兜底）
+    if (tagFilter === tag) setTagFilter('all')
+  }
+  /** tagFilter 守护：指向的标签已不在 allTags 里时自动回退 'all'（删标签/任务变更后兜底） */
+  useEffect(() => {
+    if (tagFilter !== 'all' && tagFilter !== null && !allTags.includes(tagFilter)) {
+      setTagFilter('all')
+    }
+  }, [tagFilter, allTags])
 
   // v1.10.8：每个根任务是否「逻辑完成」（自身 done 且所有子任务 done）
   const logicallyDoneIds = useMemo(() => {
@@ -314,6 +382,17 @@ export function TasksPage() {
                     </option>
                   ))}
                 </select>
+                {/* v1.22 标签字典管理入口 */}
+                <button
+                  onClick={() => setTagManageOpen((v) => !v)}
+                  title="管理标签字典（删除不在用的标签）"
+                  className={cn(
+                    'flex h-7 items-center rounded-md border px-1.5 text-xs transition-colors',
+                    tagManageOpen ? 'border-accent bg-accent/10 text-accent' : 'border-input text-muted-foreground hover:bg-accent/5',
+                  )}
+                >
+                  <Trash2 size={11} />
+                </button>
               </>
             )}
             <span className="text-[11px] text-muted-foreground">分组</span>
@@ -326,8 +405,83 @@ export function TasksPage() {
               <option value="priority">按优先级</option>
               <option value="none">不分组</option>
             </select>
+            {/* v1.22 批量操作入口 */}
+            <Button
+              variant={selectMode ? 'default' : 'outline'}
+              size="sm"
+              onClick={() => (selectMode ? exitSelectMode() : setSelectMode(true))}
+              className="h-7 gap-1 text-xs"
+            >
+              {selectMode ? '退出' : '批量'}
+            </Button>
           </div>
         </div>
+
+        {/* v1.22 标签字典管理面板（点整理按钮展开）*/}
+        {tagManageOpen && (
+          <div className="rounded-md border border-border bg-card p-2">
+            <div className="mb-1.5 flex items-center justify-between">
+              <span className="text-xs font-medium text-muted-foreground">标签字典（未被任务使用的可删除）</span>
+              <button onClick={() => setTagManageOpen(false)} className="text-xs text-muted-foreground hover:text-foreground">收起</button>
+            </div>
+            {tagDict.length === 0 ? (
+              <div className="text-xs text-muted-foreground">字典为空</div>
+            ) : (
+              <div className="flex flex-wrap gap-1.5">
+                {tagDict.map((tag) => {
+                  const inUse = isTagInUse(tag)
+                  return (
+                    <span
+                      key={tag}
+                      className={cn(
+                        'inline-flex items-center gap-1 rounded-full border px-2 py-0.5 text-xs',
+                        inUse ? 'border-accent/40 bg-accent/10 text-accent' : 'border-border bg-accent/5 text-muted-foreground',
+                      )}
+                    >
+                      {tag}
+                      {inUse ? (
+                        <span className="text-[10px] text-muted-foreground/60" title="被任务使用，不可删除">使用中</span>
+                      ) : (
+                        <button
+                          onClick={() => deleteTagFromDict(tag)}
+                          title="从字典删除"
+                          className="text-muted-foreground hover:text-danger"
+                        >
+                          <X size={10} />
+                        </button>
+                      )}
+                    </span>
+                  )
+                })}
+              </div>
+            )}
+          </div>
+        )}
+
+        {/* v1.22 批量操作工具栏（仅 selectMode 时显示）*/}
+        {selectMode && (
+          <div className="flex flex-wrap items-center gap-1.5 rounded-md border border-accent/30 bg-accent/5 p-2">
+            <span className="text-xs font-medium text-accent">已选 {selectedIds.size} 个</span>
+            <Button variant="outline" size="sm" disabled={selectedIds.size === 0} onClick={() => batchUpdateField('status', 'done')} className="h-7 text-xs">标记完成</Button>
+            <Button variant="outline" size="sm" disabled={selectedIds.size === 0} onClick={() => batchUpdateField('status', 'todo')} className="h-7 text-xs">标记待办</Button>
+            <select
+              disabled={selectedIds.size === 0}
+              onChange={(e) => { if (e.target.value) batchUpdateField('priority', e.target.value); e.target.value = '' }}
+              className="h-7 rounded-md border border-input bg-background px-2 text-xs disabled:opacity-50"
+              defaultValue=""
+            >
+              <option value="" disabled>改优先级…</option>
+              <option value="high">高</option>
+              <option value="medium">中</option>
+              <option value="low">低</option>
+            </select>
+            <Button variant="outline" size="sm" onClick={() => selectAllFiltered(filtered.map((t) => t.id))} className="h-7 text-xs">全选</Button>
+            <Button variant="ghost" size="sm" onClick={() => setSelectedIds(new Set())} disabled={selectedIds.size === 0} className="h-7 text-xs">清空选择</Button>
+            <Button variant="outline" size="sm" disabled={selectedIds.size === 0} onClick={handleBatchDelete} className="ml-auto h-7 gap-1 text-xs text-danger hover:bg-danger/5">
+              <Trash2 size={12} /> 删除
+            </Button>
+          </div>
+        )}
 
         {filtered.length === 0 && (
           <EmptyState
@@ -382,6 +536,9 @@ export function TasksPage() {
       <TaskCard
         key={t.id}
         task={t}
+        selectMode={selectMode}
+        selected={selectedIds.has(t.id)}
+        onToggleSelect={() => toggleSelect(t.id)}
         subtasks={subtasksByParent.get(t.id) ?? EMPTY_TASKS}
         allRootTasks={rootTasks}
         allTasks={tasks}
@@ -585,17 +742,20 @@ function TagEditor({
             ))}
         </div>
       )}
-      {/* 输入新标签 */}
+      {/* 输入新标签：回车/失焦/保存时自动提交（不用手动回车）*/}
       <Input
         value={input}
         onChange={(e) => setInput(e.target.value)}
-        placeholder="输入新标签，回车添加"
+        placeholder="输入新标签，回车或失焦自动添加"
         className="h-8 text-xs"
         onKeyDown={(e) => {
           if (e.key === 'Enter' && input.trim()) {
             e.preventDefault()
             addNew()
           }
+        }}
+        onBlur={() => {
+          if (input.trim()) addNew()
         }}
       />
     </div>
@@ -771,6 +931,9 @@ function TaskNode({
 // ---------- 单个任务卡片（根任务，v1.10 含子任务区） ----------
 function TaskCard({
   task,
+  selectMode,
+  selected,
+  onToggleSelect,
   subtasks,
   allRootTasks,
   allTasks,
@@ -789,6 +952,9 @@ function TaskCard({
   onSetParent,
 }: {
   task: Task
+  selectMode: boolean
+  selected: boolean
+  onToggleSelect: () => void
   subtasks: Task[]
   allRootTasks: Task[]
   allTasks: Task[]
@@ -940,10 +1106,22 @@ function TaskCard({
   const done = isLogicallyDone(task, subtasks)
   const doneSubCount = subtasks.filter((s) => s.status === 'done').length
   return (
-    <Card className={`transition-all duration-200 hover:-translate-y-0.5 hover:shadow-md ${done ? 'opacity-60' : ''}`}>
+    <Card className={`transition-all duration-200 hover:-translate-y-0.5 hover:shadow-md ${done ? 'opacity-60' : ''} ${selected ? 'ring-2 ring-accent' : ''}`}>
       <CardContent className="space-y-2 pt-4">
         <div className="flex items-start justify-between gap-3">
           <div className="flex items-start gap-2">
+            {/* v1.22 批量选择 checkbox（仅 selectMode 时显示，在完成按钮左侧）*/}
+            {selectMode && (
+              <button
+                onClick={onToggleSelect}
+                title={selected ? '取消选择' : '选择'}
+                className={`mt-0.5 flex h-5 w-5 flex-shrink-0 items-center justify-center rounded border-2 transition-colors ${
+                  selected ? 'border-accent bg-accent text-primary-foreground' : 'border-muted-foreground/40 hover:border-accent'
+                }`}
+              >
+                {selected && <Check size={12} />}
+              </button>
+            )}
             <button
               onClick={onToggleDone}
               title={done ? '标记为待办' : '标记完成'}

@@ -1,4 +1,4 @@
-import { eq, asc, desc, and, gte, lte } from 'drizzle-orm'
+import { eq, asc, desc, and, gte, lte, like, not, inArray } from 'drizzle-orm'
 import { getDb } from '../db'
 import { conversations, messages } from '../db/schema'
 import type { Conversation, ConversationMessage } from '../../types'
@@ -90,4 +90,60 @@ export function listMessagesInRange(fromSec: number, toSec: number): Conversatio
       attachments: (r.attachments ?? null) as ConversationMessage['attachments'],
       createdAt: r.createdAt,
     }))
+}
+
+// ---------- v1.22 对话搜索 ----------
+
+/** 搜索命中项（跨会话搜消息内容，点击跳转到对应会话）。 */
+export interface MessageSearchHit {
+  messageId: string
+  conversationId: string
+  conversationTitle: string
+  role: string
+  snippet: string // 匹配处前后片段
+  createdAt: number
+}
+
+/** 截取匹配处前后片段（照搬 noteStore makeSnippet 思路）。 */
+function makeSnippet(content: string, query: string, radius = 40): string {
+  const lower = content.toLowerCase()
+  const idx = lower.indexOf(query.toLowerCase())
+  if (idx < 0) return content.slice(0, radius * 2)
+  const start = Math.max(0, idx - radius)
+  const end = Math.min(content.length, idx + query.length + radius)
+  return (start > 0 ? '…' : '') + content.slice(start, end) + (end < content.length ? '…' : '')
+}
+
+/**
+ * 跨会话搜索消息内容（v1.22）。
+ * LIKE 全表扫描（无 FTS，当前规模够用）。排除 role='tool'（FC 结果噪音）和空内容。
+ * limit 100 防爆，按 createdAt desc（最近在前）。
+ */
+export function searchMessages(query: string): MessageSearchHit[] {
+  const q = query.trim()
+  if (!q) return []
+  const rows = getDb()
+    .select()
+    .from(messages)
+    .where(and(like(messages.content, `%${q}%`), not(inArray(messages.role, ['system', 'tool']))))
+    .orderBy(desc(messages.createdAt))
+    .limit(100)
+    .all()
+
+  // 批量取 conversation title（去重查询避免 N+1）
+  const convIds = [...new Set(rows.map((r) => r.conversationId))]
+  const titleMap = new Map<string, string>()
+  for (const cid of convIds) {
+    const c = getConversation(cid)
+    titleMap.set(cid, c?.title ?? '已删除会话')
+  }
+
+  return rows.map((r) => ({
+    messageId: r.id,
+    conversationId: r.conversationId,
+    conversationTitle: titleMap.get(r.conversationId) ?? '',
+    role: r.role,
+    snippet: makeSnippet(r.content, q),
+    createdAt: r.createdAt,
+  }))
 }

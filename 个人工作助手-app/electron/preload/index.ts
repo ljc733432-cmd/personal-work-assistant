@@ -68,6 +68,7 @@ const ALLOWED_INVOKE = [
   'conversation:delete',    // 删除会话（级联删消息）
   'message:list',           // 列某会话全部消息（历史 hydrate，M2）
   'message:insert',         // 写单条消息（chat:send 落库用，M2）
+  'message:search',         // 跨会话搜索消息内容（v1.22）
   'dashboard:activity',     // 看板：按天聚合消息数（v1.4 M14）
   'report:generate',        // AI 日报/周报：聚合任务/对话/番茄/提醒生成报告笔记（v1.8 M17）
   'report:preview',         // 报告数据预览：返各类计数，不调模型（v1.8.1 打磨）

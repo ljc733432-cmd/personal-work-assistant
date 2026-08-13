@@ -1,8 +1,10 @@
 import { useEffect, useRef, useState } from 'react'
-import { Plus, X, Loader2 } from '@/components/ui/icons'
+import { Plus, X, Loader2, Search } from '@/components/ui/icons'
 import { Button } from '@/components/ui/button'
+import { Input } from '@/components/ui/input'
+import { invoke } from '@/lib/ipc'
 import { useChatStore } from '@/stores/chat'
-import type { Conversation } from '@/types'
+import type { Conversation, MessageSearchHit } from '@/types'
 
 /**
  * 会话列表侧栏（M2-Step5）。
@@ -39,6 +41,31 @@ export function ConversationList() {
   const [editingId, setEditingId] = useState<string | null>(null)
   const [editTitle, setEditTitle] = useState('')
   const editRef = useRef<HTMLInputElement>(null)
+  // v1.22 对话搜索
+  const [query, setQuery] = useState('')
+  const [hits, setHits] = useState<MessageSearchHit[] | null>(null)
+  const [searching, setSearching] = useState(false)
+
+  const handleSearch = (val: string) => {
+    setQuery(val)
+    const q = val.trim()
+    if (!q) {
+      setHits(null)
+      setSearching(false)
+      return
+    }
+    setSearching(true)
+    invoke<MessageSearchHit[]>('message:search', q)
+      .then((list) => setHits(list))
+      .catch(() => setHits([]))
+      .finally(() => setSearching(false))
+  }
+
+  const jumpToHit = async (hit: MessageSearchHit) => {
+    await switchConversation(hit.conversationId)
+    setQuery('')
+    setHits(null)
+  }
 
   useEffect(() => {
     if (editingId) editRef.current?.focus()
@@ -77,21 +104,64 @@ export function ConversationList() {
 
   return (
     <div className="flex h-full w-[220px] flex-col border-r bg-card">
-      {/* 顶部：新建 */}
-      <div className="border-b p-2">
+      {/* 顶部：新建 + 搜索（v1.22）*/}
+      <div className="space-y-2 border-b p-2">
         <Button onClick={handleNew} variant="outline" className="w-full justify-start gap-1.5">
           <Plus size={14} /> 新会话
         </Button>
+        <div className="relative">
+          <Search size={12} className="absolute left-2 top-1/2 -translate-y-1/2 text-muted-foreground" />
+          <Input
+            value={query}
+            onChange={(e) => handleSearch(e.target.value)}
+            placeholder="搜索对话内容"
+            className="h-7 pl-7 text-xs"
+          />
+          {searching && (
+            <Loader2 size={12} className="absolute right-2 top-1/2 -translate-y-1/2 animate-spin text-muted-foreground" />
+          )}
+        </div>
       </div>
 
-      {/* 列表 */}
+      {/* 列表：搜索时显示结果，否则正常会话列表 */}
       <div className="flex-1 overflow-y-auto p-1.5">
-        {conversations.length === 0 && (
-          <div className="mt-4 px-2 text-center text-xs text-muted-foreground">
-            暂无会话
-          </div>
-        )}
-        <div className="space-y-0.5">
+        {hits !== null ? (
+          // 搜索结果模式
+          hits.length === 0 ? (
+            <div className="mt-4 px-2 text-center text-xs text-muted-foreground">
+              {searching ? '搜索中…' : '无匹配结果'}
+            </div>
+          ) : (
+            <div className="space-y-1">
+              <div className="px-1 pb-1 text-[10px] text-muted-foreground">{hits.length} 条结果</div>
+              {hits.map((hit) => (
+                <button
+                  key={hit.messageId}
+                  onClick={() => jumpToHit(hit)}
+                  className="block w-full rounded-md px-2 py-1.5 text-left transition-colors hover:bg-surface-3"
+                >
+                  <div className="truncate text-xs font-medium text-foreground">
+                    {hit.conversationTitle}
+                  </div>
+                  <div className="mt-0.5 line-clamp-2 text-[11px] text-muted-foreground">
+                    {hit.snippet}
+                  </div>
+                  <div className="mt-0.5 text-[10px] text-muted-foreground/70">
+                    {hit.role === 'user' ? '我' : 'AI'} · {relativeTime(hit.createdAt)}
+                  </div>
+                </button>
+              ))}
+            </div>
+          )
+        ) : (
+          // 正常会话列表
+          <>
+            {conversations.length === 0 && (
+              <div className="mt-4 px-2 text-center text-xs text-muted-foreground">
+                暂无会话
+              </div>
+            )}
+            <div className="space-y-0.5">
           {conversations.map((conv) => {
             const isActive = conv.id === activeId
             const isEditing = conv.id === editingId
@@ -150,6 +220,8 @@ export function ConversationList() {
             )
           })}
         </div>
+          </>
+        )}
       </div>
     </div>
   )
