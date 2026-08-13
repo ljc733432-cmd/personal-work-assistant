@@ -324,6 +324,28 @@ export function ChatPage() {
     send('chat:cancel', rid)
   }
 
+  // v1.21 快捷键：Ctrl+Enter 发送 + Esc 取消流式。ChatPage 常驻挂载，window 监听全局生效。
+  // 裸 Enter 发送已在 textarea onKeyDown 处理，Ctrl+Enter 是额外方式（习惯用户）。
+  useEffect(() => {
+    const handler = (e: KeyboardEvent) => {
+      // Esc 取消流式（仅 streaming 时）
+      if (e.key === 'Escape' && streaming) {
+        e.preventDefault()
+        handleCancel()
+        return
+      }
+      // Ctrl+Enter 发送（非 streaming、有输入时）
+      if ((e.ctrlKey || e.metaKey) && e.key === 'Enter') {
+        if (!streaming && input.trim()) {
+          e.preventDefault()
+          void handleSend()
+        }
+      }
+    }
+    window.addEventListener('keydown', handler)
+    return () => window.removeEventListener('keydown', handler)
+  }, [streaming, input, handleSend, handleCancel])
+
   // v1.17 对话发图：粘贴/上传图片到待发送列表（不在正文插文本，单独预览）。
   // 粘贴：拦截 clipboardData 里的图片项，转 dataUrl 加入 pendingImages。
   const handlePaste = (e: ClipboardEvent<HTMLTextAreaElement>) => {

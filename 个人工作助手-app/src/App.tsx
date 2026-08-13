@@ -23,6 +23,7 @@ import { NotesPage } from '@/pages/notes/NotesPage'
 import { OverviewPage } from '@/pages/overview/OverviewPage'
 import { DashboardPage } from '@/pages/dashboard/DashboardPage'
 import { useNavStore, type Tab } from '@/pages/overview/nav'
+import { useGlobalShortcuts } from '@/lib/useGlobalShortcuts'
 
 // v1.3：导航 6 项（概览/对话/任务/笔记/工具/设置）。默认首页改为概览。
 // 导航 store 化（useNavStore），跨页跳转（OverviewPage 快捷入口）用 setTab。
@@ -32,6 +33,9 @@ function App() {
   const setTab = useNavStore((s) => s.setTab)
   const resolved = useThemeStore((s) => s.resolved)
   const setMode = useThemeStore((s) => s.setMode)
+
+  // v1.21 全局快捷键（Ctrl+1~7 切板块 + Ctrl+N 上下文新建）
+  useGlobalShortcuts()
 
   // M6：订阅跟进通知点击 → 跳转到对话页 + 切到跟进会话
   useEffect(() => {
@@ -53,28 +57,28 @@ function App() {
     <div className="flex h-screen w-screen overflow-hidden bg-background">
       {/* 侧栏（v1.3 Soft UI：bg-surface-2 + 右侧 shadow 分隔）*/}
       <nav className="flex w-16 flex-col items-center gap-1 border-r bg-surface-2 py-4 shadow-sm">
-        <NavBtn active={tab === 'overview'} onClick={() => setTab('overview')} label="概览">
+        <NavBtn active={tab === 'overview'} onClick={() => setTab('overview')} label="概览（Ctrl+1）">
           <House size={20} />
         </NavBtn>
-        <NavBtn active={tab === 'dashboard'} onClick={() => setTab('dashboard')} label="看板">
+        <NavBtn active={tab === 'dashboard'} onClick={() => setTab('dashboard')} label="看板（Ctrl+2）">
           <Dashboard size={20} />
         </NavBtn>
-        <NavBtn active={tab === 'chat'} onClick={() => setTab('chat')} label="对话">
+        <NavBtn active={tab === 'chat'} onClick={() => setTab('chat')} label="对话（Ctrl+3）">
           <MessageSquare size={20} />
         </NavBtn>
-        <NavBtn active={tab === 'tasks'} onClick={() => setTab('tasks')} label="任务">
+        <NavBtn active={tab === 'tasks'} onClick={() => setTab('tasks')} label="任务（Ctrl+4）">
           <CheckSquare size={20} />
         </NavBtn>
-        <NavBtn active={tab === 'notes'} onClick={() => setTab('notes')} label="笔记">
+        <NavBtn active={tab === 'notes'} onClick={() => setTab('notes')} label="笔记（Ctrl+5）">
           <StickyNote size={20} />
         </NavBtn>
-        <NavBtn active={tab === 'tools'} onClick={() => setTab('tools')} label="工具">
+        <NavBtn active={tab === 'tools'} onClick={() => setTab('tools')} label="工具（Ctrl+6）">
           <Wrench size={20} />
         </NavBtn>
 
         {/* 分组分隔（hairline）+ 设置 */}
         <div className="my-2 h-px w-6 bg-border" />
-        <NavBtn active={tab === 'settings'} onClick={() => setTab('settings')} label="设置">
+        <NavBtn active={tab === 'settings'} onClick={() => setTab('settings')} label="设置（Ctrl+7）">
           <Settings size={20} />
         </NavBtn>
 

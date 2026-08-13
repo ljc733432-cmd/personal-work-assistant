@@ -25,6 +25,7 @@ import { EmptyState } from '@/components/ui/EmptyState'
 import { useNotesStore } from '@/stores/notes'
 import { useTasksStore } from '@/stores/tasks'
 import { invoke } from '@/lib/ipc'
+import { consumeLastCreatedNoteId } from '@/lib/useGlobalShortcuts'
 import { cn } from '@/lib/utils'
 import type { Note, NoteSearchHit, NoteAiOp, NoteAiResult, Task } from '@/types'
 
@@ -111,6 +112,39 @@ export function NotesPage() {
       console.error('[notes] 保存失败', e)
     }
   }
+
+  // v1.21 快捷键：Ctrl+S 保存 + Ctrl+E 切编辑/预览。NotesPage 非常驻，仅笔记页激活时生效。
+  useEffect(() => {
+    const handler = (e: KeyboardEvent) => {
+      if (!active) return
+      // Ctrl+S 保存（阻止浏览器默认保存网页）
+      if ((e.ctrlKey || e.metaKey) && (e.key === 's' || e.key === 'S')) {
+        e.preventDefault()
+        if (editing) void handleSave()
+        return
+      }
+      // Ctrl+E 切编辑/预览
+      if ((e.ctrlKey || e.metaKey) && (e.key === 'e' || e.key === 'E')) {
+        e.preventDefault()
+        if (editing) {
+          void handleSave() // 编辑态切预览 = 先保存
+        } else {
+          setEditing(true)
+        }
+      }
+    }
+    window.addEventListener('keydown', handler)
+    return () => window.removeEventListener('keydown', handler)
+  }, [active, editing, draftTitle, draftContent]) // eslint-disable-line react-hooks/exhaustive-deps
+
+  // v1.21 消费 Ctrl+N 在别处新建的笔记 id：挂载时若有则自动选中并进入编辑态
+  useEffect(() => {
+    const id = consumeLastCreatedNoteId()
+    if (id) {
+      setActiveId(id)
+      setEditing(true)
+    }
+  }, [])
 
   const handleDelete = async () => {
     if (!active) return
